@@ -1,3 +1,8 @@
+// (C) Ulvetanna Inc.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+// Developer: Alişah Özcan
+// Paper: https://eprint.iacr.org/2023/1410
 
 #include <curand_kernel.h>
 #include <stdio.h>
