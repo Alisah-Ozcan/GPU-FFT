@@ -2,16 +2,19 @@
 // Author: Alisah Ozcan
 // --------------------- //
 
-#include "complex.cuh"
-
 #ifndef CPU_FFT_H
 #define CPU_FFT_H
 
+#include "complex.cuh"
+
+namespace fft
+{
+
 int bitreverse(int index, int n_power);
 
-std::vector<unsigned long long> schoolbook_poly_multiplication(
-    std::vector<unsigned long long> a, std::vector<unsigned long long> b,
-    unsigned long long modulus, int size);
+std::vector<unsigned long long> schoolbook_poly_multiplication(std::vector<unsigned long long> a,
+                                                               std::vector<unsigned long long> b,
+                                                               unsigned long long modulus, int size);
 
 class FFT
 {
@@ -44,4 +47,5 @@ class FFT
     std::vector<COMPLEX_C> InverseReverseRootTable();
 };
 
+}  // namespace fft
 #endif  // CPU_FFT_H

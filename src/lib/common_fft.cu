@@ -1,8 +1,11 @@
-#include "common.cuh"
+#include "common_fft.cuh"
+
+namespace fft
+{
 
 void customAssert(bool condition, const std::string& errorMessage)
 {
-    if (!condition)
+    if(!condition)
     {
         std::cerr << "Custom assertion failed: " << errorMessage << std::endl;
         assert(condition);
@@ -12,7 +15,7 @@ void customAssert(bool condition, const std::string& errorMessage)
 float calculate_mean(const float array[], int size)
 {
     float sum = 0.0;
-    for (int i = 0; i < size; ++i)
+    for(int i = 0; i < size; ++i)
     {
         sum += array[i];
     }
@@ -24,7 +27,7 @@ float calculate_standard_deviation(const float array[], int size)
     float mean = calculate_mean(array, size);
     float sum_squared_diff = 0.0;
 
-    for (int i = 0; i < size; ++i)
+    for(int i = 0; i < size; ++i)
     {
         float diff = array[i] - mean;
         sum_squared_diff += diff * diff;
@@ -36,7 +39,7 @@ float calculate_standard_deviation(const float array[], int size)
 
 float find_best_average(const float array[], int array_size, int num_elements)
 {
-    if (num_elements <= 0 || num_elements > array_size)
+    if(num_elements <= 0 || num_elements > array_size)
     {
         std::cerr << "Invalid number of elements." << std::endl;
         return 0.0;
@@ -44,10 +47,10 @@ float find_best_average(const float array[], int array_size, int num_elements)
 
     float max_average = 0.0;
 
-    for (int i = 0; i <= array_size - num_elements; ++i)
+    for(int i = 0; i <= array_size - num_elements; ++i)
     {
         float sum = 0.0;
-        for (int j = i; j < i + num_elements; ++j)
+        for(int j = i; j < i + num_elements; ++j)
         {
             sum += array[j];
         }
@@ -60,7 +63,7 @@ float find_best_average(const float array[], int array_size, int num_elements)
 
 float find_min_average(const float array[], int array_size, int num_elements)
 {
-    if (num_elements <= 0 || num_elements > array_size)
+    if(num_elements <= 0 || num_elements > array_size)
     {
         std::cerr << "Invalid number of elements." << std::endl;
         return 0.0;
@@ -68,10 +71,10 @@ float find_min_average(const float array[], int array_size, int num_elements)
 
     float min_average = std::numeric_limits<float>::max();
 
-    for (int i = 0; i <= array_size - num_elements; ++i)
+    for(int i = 0; i <= array_size - num_elements; ++i)
     {
         float sum = 0.0;
-        for (int j = i; j < i + num_elements; ++j)
+        for(int j = i; j < i + num_elements; ++j)
         {
             sum += array[j];
         }
@@ -81,3 +84,4 @@ float find_min_average(const float array[], int array_size, int num_elements)
 
     return min_average;
 }
+}  // namespace fft
