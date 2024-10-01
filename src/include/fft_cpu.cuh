@@ -1,6 +1,7 @@
-// --------------------- //
-// Author: Alisah Ozcan
-// --------------------- //
+// Copyright 2024 Alişah Özcan
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+// Developer: Alişah Özcan
 
 #ifndef CPU_FFT_H
 #define CPU_FFT_H
@@ -10,42 +11,54 @@
 namespace fft
 {
 
-int bitreverse(int index, int n_power);
+    int bitreverse(int index, int n_power);
 
-std::vector<unsigned long long> schoolbook_poly_multiplication(std::vector<unsigned long long> a,
-                                                               std::vector<unsigned long long> b,
-                                                               unsigned long long modulus, int size);
+    enum ReductionPolynomial
+    {
+        X_N_plus,
+        X_N_minus
+    }; // X_N_minus: X^n - 1, X_N_plus: X^n + 1
 
-class FFT
-{
-   public:
-    static int n;
-    static int logn;
-    static COMPLEX_C x;
-    static int max_size;
+    std::vector<unsigned long long>
+    schoolbook_poly_multiplication(std::vector<unsigned long long> a,
+                                   std::vector<unsigned long long> b,
+                                   unsigned long long modulus, int size);
 
-    static float root;
-    static std::vector<COMPLEX_C> root_tables;
-    static std::vector<COMPLEX_C> inverse_root_tables;
+    std::vector<unsigned long long>
+    schoolbook_poly_multiplication_without_reduction(
+        std::vector<unsigned long long> a, std::vector<unsigned long long> b,
+        unsigned long long modulus, int size);
 
-    static float n_inverse;
+    class FFT
+    {
+      public:
+        static int n;
+        static int logn;
+        static COMPLEX_C x;
+        static int max_size;
 
-    FFT(int size);
+        static COMPLEX_C root; // it was float
+        static std::vector<COMPLEX_C> root_tables;
+        static std::vector<COMPLEX_C> inverse_root_tables;
 
-   private:
-    static void GenerateRootTable();
+        static float n_inverse;
 
-    static void GenerateInverseRootTable();
+        FFT(int size);
 
-   public:
-    void fft(std::vector<COMPLEX_C> &input);
+      private:
+        static void GenerateRootTable();
 
-    void ifft(std::vector<COMPLEX_C> &input);
+        static void GenerateInverseRootTable();
 
-    std::vector<COMPLEX_C> ReverseRootTable();
+      public:
+        void fft(std::vector<COMPLEX_C>& input);
 
-    std::vector<COMPLEX_C> InverseReverseRootTable();
-};
+        void ifft(std::vector<COMPLEX_C>& input);
 
-}  // namespace fft
-#endif  // CPU_FFT_H
+        std::vector<COMPLEX_C> ReverseRootTable();
+
+        std::vector<COMPLEX_C> InverseReverseRootTable();
+    };
+
+} // namespace fft
+#endif // CPU_FFT_H

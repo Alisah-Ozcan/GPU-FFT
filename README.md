@@ -13,61 +13,72 @@ NTT variant of GPU-FFT is available: https://github.com/Alisah-Ozcan/GPU-NTT
 - [GCC](https://gcc.gnu.org/)
 - [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads)
 
-### Testing & Benchmarking
+### Build & Install
 
-Four different float data type supported. They represented as numbers:
+Two different fix-point data type supported. They represented as numbers:
 
-- COPLEX_DATA_TYPE=0 -> THRUST_FLOAT_32(32 bit)
-- COPLEX_DATA_TYPE=1 -> THRUST_FLOAT_64(64 bit)
-- COPLEX_DATA_TYPE=2 -> FLOAT_32(32 bit)
-- COPLEX_DATA_TYPE=3 -> FLOAT_64(64 bit)
+- COPLEX_DATA_TYPE=0 -> FLOAT_64(64 bit)
+- COPLEX_DATA_TYPE=1 -> FLOAT_32(32 bit)
 
-
-#### Testing CPU & GPU FTT with Schoolbook Polynomial Multiplication
-
-To build tests:
+To build:
 
 ```bash
 $ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D COPLEX_DATA_TYPE=0 -B./build
 $ cmake --build ./build/ --parallel
 ```
 
-To run tests:
+To install:
 
 ```bash
-$ ./build/bin/gpu_fft_examples <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D COPLEX_DATA_TYPE=0 -B./build
+$ cmake --build ./build/ --parallel
+$ sudo cmake --install build
+```
+
+### Testing & Benchmarking
+
+#### CPU & GPU FTT Testing & Benchmarking
+
+To run examples:
+
+```bash
+$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D COPLEX_DATA_TYPE=0 -D GPUFFT_BUILD_EXAMPLES=ON -B./build
+$ cmake --build ./build/ --parallel
+
+$ ./build/bin/cpu_fft_examples        <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+$ ./build/bin/gpu_fft_examples        <RING_SIZE_IN_LOG2> <BATCH_SIZE>
 $ Example: ./build/bin/gpu_fft_examples 12 1
 ```
 
-#### Benchmarking GPU FFT
-
-To build tests:
+To run benchmarks:
 
 ```bash
-$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D COPLEX_DATA_TYPE=0 -B./build
+$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D COPLEX_DATA_TYPE=0 -D GPUFFT_BUILD_BENCHMARKS=ON -B./build
 $ cmake --build ./build/ --parallel
+
+$ ./build/bin/gpu_fft_mult_benchmark  <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+$ ./build/bin/gpu_fft_benchmark       <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+$ Example: ./build/bin/gpu_fft_examples 12 1
 ```
 
-To run tests:
+## Using GPU-FFT in a downstream CMake project
 
-```bash
-$ ./build/bin/benchmark_fft <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+Make sure GPU-FFT is installed before integrating it into your project. The installed GPU-FFT library provides a set of config files that make it easy to integrate GPU-FFT into your own CMake project. In your CMakeLists.txt, simply add:
+
+```cmake
+project(<your-project> LANGUAGES CXX CUDA)
+find_package(CUDAToolkit REQUIRED)
+# ...
+find_package(GPUFFT)
+# ...
+target_link_libraries(<your-target> (PRIVATE|PUBLIC|INTERFACE) GPUNTT::ntt CUDA::cudart)
+# ...
+add_compile_definitions(FLOAT_64) # Builded reduction method 
+target_compile_definitions(<your-target> PRIVATE FLOAT_64)
+set_target_properties(<your-target> PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+# ...
 ```
 
-#### Benchmarking Polynomial Multiplication with using FFT
-
-To build tests:
-
-```bash
-$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D COPLEX_DATA_TYPE=0 -B./build
-$ cmake --build ./build/ --parallel
-```
-
-To run tests:
-
-```bash
-$ ./build/bin/benchmark_polymult <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-```
 ## How to Cite GPU-FFT
 
 Please use the below BibTeX, to cite GPU-FFT in academic papers.
@@ -82,3 +93,11 @@ Please use the below BibTeX, to cite GPU-FFT in academic papers.
       url = {https://eprint.iacr.org/2023/1410}
 }
 ```
+
+## License
+This project is licensed under the [Apache License](LICENSE). For more details, please refer to the License file.
+
+## Contact
+If you have any questions or feedback, feel free to contact me: 
+- Email: alisah@sabanciuniv.edu
+- LinkedIn: [Profile](https://www.linkedin.com/in/ali%C5%9Fah-%C3%B6zcan-472382305/)
