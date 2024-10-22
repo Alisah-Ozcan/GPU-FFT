@@ -8,6 +8,7 @@
 
 #include <complex>
 #include <vector>
+#include "cuda_runtime.h"
 
 #ifdef FLOAT_64
 typedef std::complex<double> COMPLEX_C;
@@ -55,30 +56,26 @@ namespace complex_fix_point
         __host__ __device__ __forceinline__ Complex() : data({0.0, 0.0}) {}
 
         // Overload the addition operator (+) within the namespace
-        __host__ __device__ __forceinline__ Complex
-        operator+(const Complex& other) const
+        __device__ __forceinline__ Complex operator+(const Complex& other) const
         {
             return Complex(real() + other.real(), imag() + other.imag());
         }
 
         // Overload the subtraction operator (-) within the namespace
-        __host__ __device__ __forceinline__ Complex
-        operator-(const Complex& other) const
+        __device__ __forceinline__ Complex operator-(const Complex& other) const
         {
             return Complex(real() - other.real(), imag() - other.imag());
         }
 
         // Overload the multiplication operator (*) within the namespace
-        __host__ __device__ __forceinline__ Complex
-        operator*(const Complex& other) const
+        __device__ __forceinline__ Complex operator*(const Complex& other) const
         {
             return Complex(real() * other.real() - imag() * other.imag(),
                            real() * other.imag() + imag() * other.real());
         }
 
         // Overload the division operator (/) within the namespace
-        __host__ __device__ __forceinline__ Complex
-        operator/(const Complex& other) const
+        __device__ __forceinline__ Complex operator/(const Complex& other) const
         {
             FIXED_POINT denominator =
                 other.real() * other.real() + other.imag() * other.imag();
@@ -88,11 +85,49 @@ namespace complex_fix_point
         }
 
         // Overload the Conjugate of complex number within the namespace
-        __host__ __device__ __forceinline__ Complex conjugate() const {
+        __device__ __forceinline__ Complex conjugate() const
+        {
             return Complex(real(), -imag());
         }
 
+        // Overload the Exponentiation of complex number within the namespace
+        __device__ __forceinline__ Complex exp(int& exponent) const
+        {
+            Complex result(1.0, 0);
+            int bits = 32 - __clz(exponent);
+            for (int i = bits - 1; i > -1; i--)
+            {
+                result = result * result;
+
+                if (((exponent >> i) & 1u))
+                {
+                    result = result * (*this);
+                }
+            }
+
+            return result;
+        }
+
+        // Overload the Exponentiation of complex number within the namespace
+        __device__ __forceinline__ Complex
+        exp(unsigned long long& exponent) const
+        {
+            Complex result(1.0, 0);
+            int bits = 64 - __clzll(exponent);
+            for (int i = bits - 1; i > -1; i--)
+            {
+                result = result * result;
+
+                if (((exponent >> i) & 1u))
+                {
+                    result = result * (*this);
+                }
+            }
+
+            return result;
+        }
     };
+
 } // namespace complex_fix_point
 
 typedef complex_fix_point::Complex COMPLEX;
