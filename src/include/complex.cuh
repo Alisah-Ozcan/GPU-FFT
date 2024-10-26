@@ -94,6 +94,11 @@ namespace complex_fix_point
         __device__ __forceinline__ Complex exp(int& exponent) const
         {
             Complex result(1.0, 0);
+
+            if(exponent == 0){
+                return result;
+            }
+
             int bits = 32 - __clz(exponent);
             for (int i = bits - 1; i > -1; i--)
             {
@@ -113,6 +118,11 @@ namespace complex_fix_point
         exp(unsigned long long& exponent) const
         {
             Complex result(1.0, 0);
+
+            if(exponent == 0ULL){
+                return result;
+            }
+
             int bits = 64 - __clzll(exponent);
             for (int i = bits - 1; i > -1; i--)
             {
