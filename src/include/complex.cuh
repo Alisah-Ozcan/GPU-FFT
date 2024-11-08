@@ -90,6 +90,23 @@ namespace complex_fix_point
             return Complex(real(), -imag());
         }
 
+        // Overload the Negate of complex number within the namespace
+        __device__ __forceinline__ Complex negate() const {
+            return Complex(-real(), -imag());
+        }
+
+        // Overload the Square of complex number within the namespace
+        __device__ __forceinline__ FIXED_POINT square() const {
+            return real() * real() + imag() * imag();
+        }
+
+        // Overload the Inverse of complex number within the namespace
+        __device__ __forceinline__ Complex inverse() const {
+            FIXED_POINT squared = square();
+            Complex conj = conjugate();
+            return Complex(conj.real() / squared, conj.imag() / squared);
+        }
+
         // Overload the Exponentiation of complex number within the namespace
         __device__ __forceinline__ Complex exp(int& exponent) const
         {
