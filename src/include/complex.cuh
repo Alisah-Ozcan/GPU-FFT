@@ -53,6 +53,13 @@ namespace complex_fix_point
             : data({r, i})
         {
         }
+
+        // Constructor to initialize the complex number with real number
+        __host__ __device__ __forceinline__ Complex(FIXED_POINT r)
+            : data({r, 0.0})
+        {
+        }
+
         __host__ __device__ __forceinline__ Complex() : data({0.0, 0.0}) {}
 
         // Overload the addition operator (+) within the namespace
@@ -91,17 +98,20 @@ namespace complex_fix_point
         }
 
         // Overload the Negate of complex number within the namespace
-        __device__ __forceinline__ Complex negate() const {
+        __device__ __forceinline__ Complex negate() const
+        {
             return Complex(-real(), -imag());
         }
 
         // Overload the Square of complex number within the namespace
-        __device__ __forceinline__ FIXED_POINT square() const {
+        __device__ __forceinline__ FIXED_POINT square() const
+        {
             return real() * real() + imag() * imag();
         }
 
         // Overload the Inverse of complex number within the namespace
-        __device__ __forceinline__ Complex inverse() const {
+        __device__ __forceinline__ Complex inverse() const
+        {
             FIXED_POINT squared = square();
             Complex conj = conjugate();
             return Complex(conj.real() / squared, conj.imag() / squared);
@@ -112,7 +122,8 @@ namespace complex_fix_point
         {
             Complex result(1.0, 0);
 
-            if(exponent == 0){
+            if (exponent == 0)
+            {
                 return result;
             }
 
@@ -136,7 +147,8 @@ namespace complex_fix_point
         {
             Complex result(1.0, 0);
 
-            if(exponent == 0ULL){
+            if (exponent == 0ULL)
+            {
                 return result;
             }
 

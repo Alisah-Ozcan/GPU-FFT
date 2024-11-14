@@ -6,7 +6,8 @@ endif()
 
 set(EXECUTABLES
     cpu_fft_examples test_fft_cpu.cu
-    gpu_fft_examples test_fft_gpu.cu
+    gpu_fft_C_C_examples test_fft_gpu_C_C.cu
+    gpu_fft_R_R_examples test_fft_gpu_R_R.cu
 )
 
 function(add_benchmark exe source)

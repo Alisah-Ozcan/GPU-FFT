@@ -71,32 +71,14 @@ int main(int argc, char* argv[])
         }
     }
 
-    std::vector<std::vector<COMPLEX_C>> A_vec(batch,
-                                              std::vector<COMPLEX_C>(n * 2));
-    std::vector<std::vector<COMPLEX_C>> B_vec(batch,
-                                              std::vector<COMPLEX_C>(n * 2));
-
-    std::vector<std::vector<COMPLEX_C>> vec_GPU(
-        2 * batch, std::vector<COMPLEX_C>(n * 2)); // A and B together
-
-    for (int j = 0; j < batch; j++)
-    {
-        for (int i = 0; i < n * 2; i++)
-        {
-            COMPLEX_C A_element = A_poly[j][i];
-            A_vec[j][i] = A_element;
-
-            COMPLEX_C B_element = B_poly[j][i];
-            B_vec[j][i] = B_element;
-        }
-    }
+    std::vector<std::vector<FIXED_POINT>> vec_GPU(
+        2 * batch, std::vector<FIXED_POINT>(n * 2)); // A and B together
 
     for (int j = 0; j < batch; j++)
     { // LOAD A
         for (int i = 0; i < n * 2; i++)
         {
-            COMPLEX_C element = A_poly[j][i];
-            vec_GPU[j][i] = element;
+            vec_GPU[j][i] = static_cast<FIXED_POINT>(A_poly[j][i]);
         }
     }
 
@@ -104,8 +86,7 @@ int main(int argc, char* argv[])
     { // LOAD B
         for (int i = 0; i < n * 2; i++)
         {
-            COMPLEX_C element = B_poly[j][i];
-            vec_GPU[j + batch][i] = element;
+            vec_GPU[j + batch][i] = static_cast<FIXED_POINT>(B_poly[j][i]);
         }
     }
 
@@ -113,17 +94,22 @@ int main(int argc, char* argv[])
 
     /////////////////////////////////////////////////////////////////////////
 
-    COMPLEX* Forward_InOut_Datas;
-
+    COMPLEX* Temp_Datas;
     FFT_CUDA_CHECK(cudaMalloc(
-        &Forward_InOut_Datas,
+        &Temp_Datas,
         2 * batch * n * 2 * sizeof(COMPLEX))); // 2 --> A and B, batch -->
                                                // batch size, 2 --> zero pad
 
+    FIXED_POINT* InOut_Datas;
+    FFT_CUDA_CHECK(cudaMalloc(
+        &InOut_Datas,
+        2 * batch * n * 2 * sizeof(FIXED_POINT))); // 2 --> A and B, batch -->
+                                                   // batch size, 2 --> zero pad
+
     for (int j = 0; j < 2 * batch; j++)
     {
-        FFT_CUDA_CHECK(cudaMemcpy(Forward_InOut_Datas + (n * 2 * j),
-                                  vec_GPU[j].data(), n * 2 * sizeof(COMPLEX),
+        FFT_CUDA_CHECK(cudaMemcpy(InOut_Datas + (n * 2 * j), vec_GPU[j].data(),
+                                  n * 2 * sizeof(FIXED_POINT),
                                   cudaMemcpyHostToDevice));
     }
     /////////////////////////////////////////////////////////////////////////
@@ -156,7 +142,8 @@ int main(int argc, char* argv[])
                                      ReductionPolynomial::X_N_minus,
                                  .zero_padding = false,
                                  .stream = 0};
-    GPU_FFT(Forward_InOut_Datas, Root_Table_Device, cfg_fft, batch * 2, false);
+    GPU_FFT(InOut_Datas, Temp_Datas, Root_Table_Device, cfg_fft, batch * 2,
+            false);
 
     fft_configuration cfg_ifft = {
         .n_power = (logn + 1),
@@ -165,13 +152,13 @@ int main(int argc, char* argv[])
         .zero_padding = false,
         .mod_inverse = COMPLEX(fft_generator.n_inverse, 0.0),
         .stream = 0};
-    GPU_FFT(Forward_InOut_Datas, Inverse_Root_Table_Device, cfg_ifft, batch,
+
+    GPU_FFT(InOut_Datas, Temp_Datas, Inverse_Root_Table_Device, cfg_ifft, batch,
             true);
 
-    //
-    COMPLEX test[batch * 2 * n];
-    FFT_CUDA_CHECK(cudaMemcpy(test, Forward_InOut_Datas,
-                              batch * n * 2 * sizeof(COMPLEX),
+    FIXED_POINT test[batch * 2 * n];
+    FFT_CUDA_CHECK(cudaMemcpy(test, InOut_Datas,
+                              batch * n * 2 * sizeof(FIXED_POINT),
                               cudaMemcpyDeviceToHost));
 
     for (int j = 0; j < batch; j++)
@@ -180,7 +167,7 @@ int main(int argc, char* argv[])
             schoolbook_poly_multiplication(A_poly[j], B_poly[j], q, n);
         for (int i = 0; i < n * 2; i++)
         {
-            signed gpu_result = std::round(test[(j * (n * 2)) + i].real());
+            signed gpu_result = std::round(test[(j * (n * 2)) + i]);
             if (test_school[i] != (gpu_result % q))
             {
                 throw("ERROR");
