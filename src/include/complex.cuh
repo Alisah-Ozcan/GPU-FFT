@@ -127,7 +127,7 @@ namespace complex_fix_point
                 return result;
             }
 
-            int bits = 32 - __clz(exponent);
+            int bits = 32 - __builtin_clz(exponent);
             for (int i = bits - 1; i > -1; i--)
             {
                 result = result * result;
@@ -152,7 +152,7 @@ namespace complex_fix_point
                 return result;
             }
 
-            int bits = 64 - __clzll(exponent);
+            int bits = 64 - __builtin_clzll(exponent);
             for (int i = bits - 1; i > -1; i--)
             {
                 result = result * result;
