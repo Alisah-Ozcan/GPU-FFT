@@ -15,22 +15,17 @@ NTT variant of GPU-FFT is available: https://github.com/Alisah-Ozcan/GPU-NTT
 
 ### Build & Install
 
-Two different fix-point data type supported. They represented as numbers:
-
-- COPLEX_DATA_TYPE=0 -> FLOAT_64(64 bit)
-- COPLEX_DATA_TYPE=1 -> FLOAT_32(32 bit)
-
 To build:
 
 ```bash
-$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D COPLEX_DATA_TYPE=0 -B./build
+$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -B./build
 $ cmake --build ./build/ --parallel
 ```
 
 To install:
 
 ```bash
-$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D COPLEX_DATA_TYPE=0 -B./build
+$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -B./build
 $ cmake --build ./build/ --parallel
 $ sudo cmake --install build
 ```
@@ -42,7 +37,7 @@ $ sudo cmake --install build
 To run examples:
 
 ```bash
-$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D COPLEX_DATA_TYPE=0 -D GPUFFT_BUILD_EXAMPLES=ON -B./build
+$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D GPUFFT_BUILD_EXAMPLES=ON -B./build
 $ cmake --build ./build/ --parallel
 
 $ ./build/bin/cpu_fft_examples        <RING_SIZE_IN_LOG2> <BATCH_SIZE>
@@ -53,7 +48,7 @@ $ Example: ./build/bin/gpu_fft_examples 12 1
 To run benchmarks:
 
 ```bash
-$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D COPLEX_DATA_TYPE=0 -D GPUFFT_BUILD_BENCHMARKS=ON -B./build
+$ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D GPUFFT_BUILD_BENCHMARKS=ON -B./build
 $ cmake --build ./build/ --parallel
 
 $ ./build/bin/gpu_fft_mult_benchmark  <RING_SIZE_IN_LOG2> <BATCH_SIZE>
@@ -73,8 +68,6 @@ find_package(GPUFFT)
 # ...
 target_link_libraries(<your-target> (PRIVATE|PUBLIC|INTERFACE) GPUNTT::ntt CUDA::cudart)
 # ...
-add_compile_definitions(FLOAT_64) # Builded reduction method 
-target_compile_definitions(<your-target> PRIVATE FLOAT_64)
 set_target_properties(<your-target> PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 # ...
 ```

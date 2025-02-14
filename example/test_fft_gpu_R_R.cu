@@ -71,14 +71,14 @@ int main(int argc, char* argv[])
         }
     }
 
-    std::vector<std::vector<FIXED_POINT>> vec_GPU(
-        2 * batch, std::vector<FIXED_POINT>(n * 2)); // A and B together
+    std::vector<std::vector<Float64>> vec_GPU(
+        2 * batch, std::vector<Float64>(n * 2)); // A and B together
 
     for (int j = 0; j < batch; j++)
     { // LOAD A
         for (int i = 0; i < n * 2; i++)
         {
-            vec_GPU[j][i] = static_cast<FIXED_POINT>(A_poly[j][i]);
+            vec_GPU[j][i] = static_cast<Float64>(A_poly[j][i]);
         }
     }
 
@@ -86,79 +86,80 @@ int main(int argc, char* argv[])
     { // LOAD B
         for (int i = 0; i < n * 2; i++)
         {
-            vec_GPU[j + batch][i] = static_cast<FIXED_POINT>(B_poly[j][i]);
+            vec_GPU[j + batch][i] = static_cast<Float64>(B_poly[j][i]);
         }
     }
 
-    FFT fft_generator(n);
+    FFT<Float64> fft_generator(n);
 
     /////////////////////////////////////////////////////////////////////////
 
-    COMPLEX* Temp_Datas;
+    Complex64* Temp_Datas;
     FFT_CUDA_CHECK(cudaMalloc(
         &Temp_Datas,
-        2 * batch * n * 2 * sizeof(COMPLEX))); // 2 --> A and B, batch -->
-                                               // batch size, 2 --> zero pad
+        2 * batch * n * 2 * sizeof(Complex64))); // 2 --> A and B, batch -->
+                                                 // batch size, 2 --> zero pad
 
-    FIXED_POINT* InOut_Datas;
+    Float64* InOut_Datas;
     FFT_CUDA_CHECK(cudaMalloc(
         &InOut_Datas,
-        2 * batch * n * 2 * sizeof(FIXED_POINT))); // 2 --> A and B, batch -->
-                                                   // batch size, 2 --> zero pad
+        2 * batch * n * 2 * sizeof(Float64))); // 2 --> A and B, batch -->
+                                               // batch size, 2 --> zero pad
 
     for (int j = 0; j < 2 * batch; j++)
     {
         FFT_CUDA_CHECK(cudaMemcpy(InOut_Datas + (n * 2 * j), vec_GPU[j].data(),
-                                  n * 2 * sizeof(FIXED_POINT),
+                                  n * 2 * sizeof(Float64),
                                   cudaMemcpyHostToDevice));
     }
     /////////////////////////////////////////////////////////////////////////
 
-    COMPLEX* Root_Table_Device;
+    Complex64* Root_Table_Device;
 
-    FFT_CUDA_CHECK(cudaMalloc(&Root_Table_Device, n * sizeof(COMPLEX)));
+    FFT_CUDA_CHECK(cudaMalloc(&Root_Table_Device, n * sizeof(Complex64)));
 
-    vector<COMPLEX_C> reverse_table = fft_generator.ReverseRootTable();
+    vector<Complex64> reverse_table = fft_generator.ReverseRootTable();
     FFT_CUDA_CHECK(cudaMemcpy(Root_Table_Device, reverse_table.data(),
-                              n * sizeof(COMPLEX), cudaMemcpyHostToDevice));
+                              n * sizeof(Complex64), cudaMemcpyHostToDevice));
 
     /////////////////////////////////////////////////////////////////////////
 
-    COMPLEX* Inverse_Root_Table_Device;
+    Complex64* Inverse_Root_Table_Device;
 
-    FFT_CUDA_CHECK(cudaMalloc(&Inverse_Root_Table_Device, n * sizeof(COMPLEX)));
+    FFT_CUDA_CHECK(
+        cudaMalloc(&Inverse_Root_Table_Device, n * sizeof(Complex64)));
 
-    vector<COMPLEX_C> inverse_reverse_table =
+    vector<Complex64> inverse_reverse_table =
         fft_generator.InverseReverseRootTable();
     FFT_CUDA_CHECK(cudaMemcpy(Inverse_Root_Table_Device,
-                              inverse_reverse_table.data(), n * sizeof(COMPLEX),
-                              cudaMemcpyHostToDevice));
+                              inverse_reverse_table.data(),
+                              n * sizeof(Complex64), cudaMemcpyHostToDevice));
 
     /////////////////////////////////////////////////////////////////////////
 
-    fft_configuration cfg_fft = {.n_power = (logn + 1),
-                                 .ntt_type = FORWARD,
-                                 .reduction_poly =
-                                     ReductionPolynomial::X_N_minus,
-                                 .zero_padding = false,
-                                 .stream = 0};
+    fft_configuration<Float64> cfg_fft = {.n_power = (logn + 1),
+                                          .fft_type = FORWARD,
+                                          .reduction_poly =
+                                              ReductionPolynomial::X_N_minus,
+                                          .zero_padding = false,
+                                          .stream = 0};
     GPU_FFT(InOut_Datas, Temp_Datas, Root_Table_Device, cfg_fft, batch * 2,
             false);
 
-    fft_configuration cfg_ifft = {
+    fft_configuration<Float64> cfg_ifft = {
         .n_power = (logn + 1),
-        .ntt_type = INVERSE,
+        .fft_type = INVERSE,
         .reduction_poly = ReductionPolynomial::X_N_minus,
         .zero_padding = false,
-        .mod_inverse = COMPLEX(fft_generator.n_inverse, 0.0),
+        .mod_inverse = Complex64(fft_generator.n_inverse, 0.0),
         .stream = 0};
 
     GPU_FFT(InOut_Datas, Temp_Datas, Inverse_Root_Table_Device, cfg_ifft, batch,
             true);
 
-    FIXED_POINT test[batch * 2 * n];
+    Float64 test[batch * 2 * n];
     FFT_CUDA_CHECK(cudaMemcpy(test, InOut_Datas,
-                              batch * n * 2 * sizeof(FIXED_POINT),
+                              batch * n * 2 * sizeof(Float64),
                               cudaMemcpyDeviceToHost));
 
     for (int j = 0; j < batch; j++)
@@ -170,7 +171,7 @@ int main(int argc, char* argv[])
             signed gpu_result = std::round(test[(j * (n * 2)) + i]);
             if (test_school[i] != (gpu_result % q))
             {
-                throw("ERROR");
+                throw runtime_error("ERROR");
             }
 
             if (i < 10)

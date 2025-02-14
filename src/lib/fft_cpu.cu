@@ -68,55 +68,45 @@ namespace fft
         return mult_vector;
     }
 
-    int FFT::n;
-    int FFT::logn;
-    COMPLEX_C FFT::x;
-    int FFT::max_size;
-    COMPLEX_C FFT::root; // it was float
-    std::vector<COMPLEX_C> FFT::root_tables;
-    std::vector<COMPLEX_C> FFT::inverse_root_tables;
-
-    float FFT::n_inverse;
-
-    FFT::FFT(int size)
+    template <typename T> FFT<T>::FFT(int size)
     {
         n = size;
         logn = int(log2(n));
-        COMPLEX_C x_(1.0, 0.0);
+        COMPLEX<T> x_(1.0, 0.0);
         x = x_;
         max_size = n * 2;
-        root = static_cast<COMPLEX_C>(2.0) * static_cast<COMPLEX_C>(M_PI) /
-               static_cast<COMPLEX_C>(max_size); // it was float
+        root = COMPLEX<T>(2.0) * COMPLEX<T>(M_PI) /
+               COMPLEX<T>(max_size); // it was float
         n_inverse = 1.0 / max_size;
 
         GenerateRootTable();
         GenerateInverseRootTable();
     }
 
-    void FFT::GenerateRootTable()
+    template <typename T> void FFT<T>::GenerateRootTable()
     {
-        COMPLEX_C j(0.0, 1.0); // Define the complex unit (imaginary part)
+        COMPLEX<T> j(0.0, 1.0); // Define the complex unit (imaginary part)
 
         for (int i = 0; i < n; i++)
         {
-            COMPLEX_C element =
-                std::exp(j * static_cast<COMPLEX_C>(i) * root); // it was float
+            COMPLEX<T> element = complex_arithmetic::exp(j * COMPLEX<T>(i) *
+                                                         root); // it was float
             root_tables.push_back(element);
         }
     }
 
-    void FFT::GenerateInverseRootTable()
+    template <typename T> void FFT<T>::GenerateInverseRootTable()
     {
-        COMPLEX_C one(1.0); // Define the complex unit (imaginary part)
+        COMPLEX<T> one(1.0); // Define the complex unit (imaginary part)
 
         for (int i = 0; i < n; i++)
         {
-            COMPLEX_C element = one / root_tables[i];
+            COMPLEX<T> element = one / root_tables[i];
             inverse_root_tables.push_back(element);
         }
     }
 
-    void FFT::fft(std::vector<COMPLEX_C>& input)
+    template <typename T> void FFT<T>::fft(std::vector<COMPLEX<T>>& input)
     {
         int t = max_size;
         int m = 1;
@@ -132,12 +122,12 @@ namespace fft
 
                 int index = bitreverse(i, logn);
 
-                COMPLEX_C S = root_tables[index];
+                COMPLEX<T> S = root_tables[index];
 
                 for (int j = j1; j < (j2 + 1); j++)
                 {
-                    COMPLEX_C U = input[j];
-                    COMPLEX_C V = input[j + t];
+                    COMPLEX<T> U = input[j];
+                    COMPLEX<T> V = input[j + t];
 
                     input[j] = U + (V * S);
                     input[j + t] = U - (V * S);
@@ -148,7 +138,7 @@ namespace fft
         }
     }
 
-    void FFT::ifft(std::vector<COMPLEX_C>& input)
+    template <typename T> void FFT<T>::ifft(std::vector<COMPLEX<T>>& input)
     {
         int t = 1;
         int m = max_size;
@@ -161,12 +151,12 @@ namespace fft
                 int j2 = j1 + t - 1;
                 int index = bitreverse(i, logn);
 
-                COMPLEX_C S = inverse_root_tables[index];
+                COMPLEX<T> S = inverse_root_tables[index];
 
                 for (int j = j1; j < (j2 + 1); j++)
                 {
-                    COMPLEX_C U = input[j];
-                    COMPLEX_C V = input[j + t];
+                    COMPLEX<T> U = input[j];
+                    COMPLEX<T> V = input[j + t];
 
                     input[j] = (U + V);
                     input[j + t] = (U - V) * S;
@@ -181,13 +171,13 @@ namespace fft
 
         for (int i = 0; i < max_size; i++)
         {
-            input[i] = input[i] * COMPLEX_C(n_inverse, 0.0);
+            input[i] = input[i] * n_inverse;
         }
     }
 
-    std::vector<COMPLEX_C> FFT::ReverseRootTable()
+    template <typename T> std::vector<COMPLEX<T>> FFT<T>::ReverseRootTable()
     {
-        std::vector<COMPLEX_C> reverse_root_table;
+        std::vector<COMPLEX<T>> reverse_root_table;
 
         int lg = log2(n);
         for (int i = 0; i < n; i++)
@@ -198,9 +188,10 @@ namespace fft
         return reverse_root_table;
     }
 
-    std::vector<COMPLEX_C> FFT::InverseReverseRootTable()
+    template <typename T>
+    std::vector<COMPLEX<T>> FFT<T>::InverseReverseRootTable()
     {
-        std::vector<COMPLEX_C> inverse_reverse_root_table;
+        std::vector<COMPLEX<T>> inverse_reverse_root_table;
 
         int lg = log2(n);
         for (int i = 0; i < n; i++)
@@ -212,4 +203,6 @@ namespace fft
         return inverse_reverse_root_table;
     }
 
+    template class FFT<Float32>;
+    template class FFT<Float64>;
 } // namespace fft

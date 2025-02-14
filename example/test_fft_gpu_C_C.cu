@@ -71,22 +71,22 @@ int main(int argc, char* argv[])
         }
     }
 
-    std::vector<std::vector<COMPLEX_C>> A_vec(batch,
-                                              std::vector<COMPLEX_C>(n * 2));
-    std::vector<std::vector<COMPLEX_C>> B_vec(batch,
-                                              std::vector<COMPLEX_C>(n * 2));
+    std::vector<std::vector<Complex64>> A_vec(batch,
+                                              std::vector<Complex64>(n * 2));
+    std::vector<std::vector<Complex64>> B_vec(batch,
+                                              std::vector<Complex64>(n * 2));
 
-    std::vector<std::vector<COMPLEX_C>> vec_GPU(
-        2 * batch, std::vector<COMPLEX_C>(n * 2)); // A and B together
+    std::vector<std::vector<Complex64>> vec_GPU(
+        2 * batch, std::vector<Complex64>(n * 2)); // A and B together
 
     for (int j = 0; j < batch; j++)
     {
         for (int i = 0; i < n * 2; i++)
         {
-            COMPLEX_C A_element = A_poly[j][i];
+            Complex64 A_element = A_poly[j][i];
             A_vec[j][i] = A_element;
 
-            COMPLEX_C B_element = B_poly[j][i];
+            Complex64 B_element = B_poly[j][i];
             B_vec[j][i] = B_element;
         }
     }
@@ -95,7 +95,7 @@ int main(int argc, char* argv[])
     { // LOAD A
         for (int i = 0; i < n * 2; i++)
         {
-            COMPLEX_C element = A_poly[j][i];
+            Complex64 element = A_poly[j][i];
             vec_GPU[j][i] = element;
         }
     }
@@ -104,73 +104,74 @@ int main(int argc, char* argv[])
     { // LOAD B
         for (int i = 0; i < n * 2; i++)
         {
-            COMPLEX_C element = B_poly[j][i];
+            Complex64 element = B_poly[j][i];
             vec_GPU[j + batch][i] = element;
         }
     }
 
-    FFT fft_generator(n);
+    FFT<Float64> fft_generator(n);
 
     /////////////////////////////////////////////////////////////////////////
 
-    COMPLEX* Forward_InOut_Datas;
+    Complex64* Forward_InOut_Datas;
 
     FFT_CUDA_CHECK(cudaMalloc(
         &Forward_InOut_Datas,
-        2 * batch * n * 2 * sizeof(COMPLEX))); // 2 --> A and B, batch -->
-                                               // batch size, 2 --> zero pad
+        2 * batch * n * 2 * sizeof(Complex64))); // 2 --> A and B, batch -->
+                                                 // batch size, 2 --> zero pad
 
     for (int j = 0; j < 2 * batch; j++)
     {
         FFT_CUDA_CHECK(cudaMemcpy(Forward_InOut_Datas + (n * 2 * j),
-                                  vec_GPU[j].data(), n * 2 * sizeof(COMPLEX),
+                                  vec_GPU[j].data(), n * 2 * sizeof(Complex64),
                                   cudaMemcpyHostToDevice));
     }
     /////////////////////////////////////////////////////////////////////////
 
-    COMPLEX* Root_Table_Device;
+    Complex64* Root_Table_Device;
 
-    FFT_CUDA_CHECK(cudaMalloc(&Root_Table_Device, n * sizeof(COMPLEX)));
+    FFT_CUDA_CHECK(cudaMalloc(&Root_Table_Device, n * sizeof(Complex64)));
 
-    vector<COMPLEX_C> reverse_table = fft_generator.ReverseRootTable();
+    vector<Complex64> reverse_table = fft_generator.ReverseRootTable();
     FFT_CUDA_CHECK(cudaMemcpy(Root_Table_Device, reverse_table.data(),
-                              n * sizeof(COMPLEX), cudaMemcpyHostToDevice));
+                              n * sizeof(Complex64), cudaMemcpyHostToDevice));
 
     /////////////////////////////////////////////////////////////////////////
 
-    COMPLEX* Inverse_Root_Table_Device;
+    Complex64* Inverse_Root_Table_Device;
 
-    FFT_CUDA_CHECK(cudaMalloc(&Inverse_Root_Table_Device, n * sizeof(COMPLEX)));
+    FFT_CUDA_CHECK(
+        cudaMalloc(&Inverse_Root_Table_Device, n * sizeof(Complex64)));
 
-    vector<COMPLEX_C> inverse_reverse_table =
+    vector<Complex64> inverse_reverse_table =
         fft_generator.InverseReverseRootTable();
     FFT_CUDA_CHECK(cudaMemcpy(Inverse_Root_Table_Device,
-                              inverse_reverse_table.data(), n * sizeof(COMPLEX),
-                              cudaMemcpyHostToDevice));
+                              inverse_reverse_table.data(),
+                              n * sizeof(Complex64), cudaMemcpyHostToDevice));
 
     /////////////////////////////////////////////////////////////////////////
 
-    fft_configuration cfg_fft = {.n_power = (logn + 1),
-                                 .ntt_type = FORWARD,
-                                 .reduction_poly =
-                                     ReductionPolynomial::X_N_minus,
-                                 .zero_padding = false,
-                                 .stream = 0};
+    fft_configuration<Float64> cfg_fft = {.n_power = (logn + 1),
+                                          .fft_type = FORWARD,
+                                          .reduction_poly =
+                                              ReductionPolynomial::X_N_minus,
+                                          .zero_padding = false,
+                                          .stream = 0};
     GPU_FFT(Forward_InOut_Datas, Root_Table_Device, cfg_fft, batch * 2, false);
 
-    fft_configuration cfg_ifft = {
+    fft_configuration<Float64> cfg_ifft = {
         .n_power = (logn + 1),
-        .ntt_type = INVERSE,
+        .fft_type = INVERSE,
         .reduction_poly = ReductionPolynomial::X_N_minus,
         .zero_padding = false,
-        .mod_inverse = COMPLEX(fft_generator.n_inverse, 0.0),
+        .mod_inverse = Complex64(fft_generator.n_inverse, 0.0),
         .stream = 0};
     GPU_FFT(Forward_InOut_Datas, Inverse_Root_Table_Device, cfg_ifft, batch,
             true);
 
-    COMPLEX test[batch * 2 * n];
+    Complex64 test[batch * 2 * n];
     FFT_CUDA_CHECK(cudaMemcpy(test, Forward_InOut_Datas,
-                              batch * n * 2 * sizeof(COMPLEX),
+                              batch * n * 2 * sizeof(Complex64),
                               cudaMemcpyDeviceToHost));
 
     for (int j = 0; j < batch; j++)
@@ -182,7 +183,7 @@ int main(int argc, char* argv[])
             signed gpu_result = std::round(test[(j * (n * 2)) + i].real());
             if (test_school[i] != (gpu_result % q))
             {
-                throw("ERROR");
+                throw runtime_error("ERROR");
             }
 
             if (i < 10)

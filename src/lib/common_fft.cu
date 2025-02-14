@@ -92,4 +92,18 @@ namespace fft
 
         return min_average;
     }
+
+    __global__ void GPU_ACTIVITY(unsigned long long* output,
+                                 unsigned long long fix_num)
+    {
+        int idx = blockIdx.x + blockDim.x + threadIdx.x;
+
+        output[idx] = fix_num;
+    }
+
+    __host__ void GPU_ACTIVITY_HOST(unsigned long long* output,
+                                    unsigned long long fix_num)
+    {
+        GPU_ACTIVITY<<<64, 512>>>(output, fix_num);
+    }
 } // namespace fft

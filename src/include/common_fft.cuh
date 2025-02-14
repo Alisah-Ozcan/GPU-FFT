@@ -58,4 +58,9 @@ namespace fft
     float find_min_average(const float array[], int array_size,
                            int num_elements);
 
+    __global__ void GPU_ACTIVITY(unsigned long long* output,
+                                 unsigned long long fix_num);
+    __host__ void GPU_ACTIVITY_HOST(unsigned long long* output,
+                                    unsigned long long fix_num);
+
 } // namespace fft

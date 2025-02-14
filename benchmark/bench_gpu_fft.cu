@@ -53,55 +53,56 @@ int main(int argc, char* argv[])
         unsigned long long maxNumber = q - 1;
         std::uniform_int_distribution<int> dis(minNumber, maxNumber);
 
-        std::vector<std::vector<COMPLEX_C>> vec_GPU(
-            batch, std::vector<COMPLEX_C>(n * 2)); // A
+        std::vector<std::vector<Complex64>> vec_GPU(
+            batch, std::vector<Complex64>(n * 2)); // A
 
         for (int j = 0; j < batch; j++)
         { // LOAD A
             for (int i = 0; i < n * 2; i++)
             {
-                COMPLEX_C element = dis(gen);
+                Complex64 element = dis(gen);
                 vec_GPU[j][i] = element;
             }
         }
 
-        FFT fft_generator(n);
+        FFT<Float64> fft_generator(n);
 
         /////////////////////////////////////////////////////////////////////////
 
-        COMPLEX* Forward_InOut_Datas;
+        Complex64* Forward_InOut_Datas;
 
-        FFT_CUDA_CHECK(
-            cudaMalloc(&Forward_InOut_Datas, batch * n * 2 * sizeof(COMPLEX)));
+        FFT_CUDA_CHECK(cudaMalloc(&Forward_InOut_Datas,
+                                  batch * n * 2 * sizeof(Complex64)));
 
         for (int j = 0; j < batch; j++)
         {
             FFT_CUDA_CHECK(
                 cudaMemcpy(Forward_InOut_Datas + (n * 2 * j), vec_GPU[j].data(),
-                           n * 2 * sizeof(COMPLEX), cudaMemcpyHostToDevice));
+                           n * 2 * sizeof(Complex64), cudaMemcpyHostToDevice));
         }
         /////////////////////////////////////////////////////////////////////////
 
-        COMPLEX* Root_Table_Device;
+        Complex64* Root_Table_Device;
 
-        FFT_CUDA_CHECK(cudaMalloc(&Root_Table_Device, n * sizeof(COMPLEX)));
+        FFT_CUDA_CHECK(cudaMalloc(&Root_Table_Device, n * sizeof(Complex64)));
 
-        vector<COMPLEX_C> reverse_table = fft_generator.ReverseRootTable();
+        vector<Complex64> reverse_table = fft_generator.ReverseRootTable();
         FFT_CUDA_CHECK(cudaMemcpy(Root_Table_Device, reverse_table.data(),
-                                  n * sizeof(COMPLEX), cudaMemcpyHostToDevice));
+                                  n * sizeof(Complex64),
+                                  cudaMemcpyHostToDevice));
 
         /////////////////////////////////////////////////////////////////////////
 
-        COMPLEX* Inverse_Root_Table_Device;
+        Complex64* Inverse_Root_Table_Device;
 
         FFT_CUDA_CHECK(
-            cudaMalloc(&Inverse_Root_Table_Device, n * sizeof(COMPLEX)));
+            cudaMalloc(&Inverse_Root_Table_Device, n * sizeof(Complex64)));
 
-        vector<COMPLEX_C> inverse_reverse_table =
+        vector<Complex64> inverse_reverse_table =
             fft_generator.InverseReverseRootTable();
-        FFT_CUDA_CHECK(cudaMemcpy(Inverse_Root_Table_Device,
-                                  inverse_reverse_table.data(),
-                                  n * sizeof(COMPLEX), cudaMemcpyHostToDevice));
+        FFT_CUDA_CHECK(
+            cudaMemcpy(Inverse_Root_Table_Device, inverse_reverse_table.data(),
+                       n * sizeof(Complex64), cudaMemcpyHostToDevice));
 
         /////////////////////////////////////////////////////////////////////////
 
@@ -115,11 +116,11 @@ int main(int argc, char* argv[])
 
         cudaDeviceSynchronize();
 
-        fft_configuration cfg_fft = {.n_power = (logn + 1),
-                                     .ntt_type = FORWARD,
-                                     .reduction_poly = X_N_minus,
-                                     .zero_padding = false,
-                                     .stream = 0};
+        fft_configuration<Float64> cfg_fft = {.n_power = (logn + 1),
+                                              .fft_type = FORWARD,
+                                              .reduction_poly = X_N_minus,
+                                              .zero_padding = false,
+                                              .stream = 0};
 
         float time = 0;
         cudaEvent_t startx, stopx;

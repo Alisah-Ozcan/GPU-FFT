@@ -29,35 +29,35 @@ namespace fft
         std::vector<unsigned long long> a, std::vector<unsigned long long> b,
         unsigned long long modulus, int size);
 
-    class FFT
+    template <typename T> class FFT
     {
       public:
-        static int n;
-        static int logn;
-        static COMPLEX_C x;
-        static int max_size;
+        int n;
+        int logn;
+        COMPLEX<T> x;
+        int max_size;
 
-        static COMPLEX_C root; // it was float
-        static std::vector<COMPLEX_C> root_tables;
-        static std::vector<COMPLEX_C> inverse_root_tables;
+        COMPLEX<T> root; // it was float
+        std::vector<COMPLEX<T>> root_tables;
+        std::vector<COMPLEX<T>> inverse_root_tables;
 
-        static float n_inverse;
+        Float<T> n_inverse;
 
         FFT(int size);
 
       private:
-        static void GenerateRootTable();
+        void GenerateRootTable();
 
-        static void GenerateInverseRootTable();
+        void GenerateInverseRootTable();
 
       public:
-        void fft(std::vector<COMPLEX_C>& input);
+        void fft(std::vector<COMPLEX<T>>& input);
 
-        void ifft(std::vector<COMPLEX_C>& input);
+        void ifft(std::vector<COMPLEX<T>>& input);
 
-        std::vector<COMPLEX_C> ReverseRootTable();
+        std::vector<COMPLEX<T>> ReverseRootTable();
 
-        std::vector<COMPLEX_C> InverseReverseRootTable();
+        std::vector<COMPLEX<T>> InverseReverseRootTable();
     };
 
 } // namespace fft

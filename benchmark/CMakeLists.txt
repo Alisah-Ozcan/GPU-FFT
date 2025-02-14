@@ -1,9 +1,5 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_LOCATION})
 
-if(NOT DEFINED COPLEX_DATA_TYPE)
-    set(COPLEX_DATA_TYPE 0)
-endif()
-
 set(EXECUTABLES
     gpu_fft_mult_benchmark bench_gpu_fft_mult.cu
     gpu_fft_benchmark bench_gpu_fft.cu
@@ -30,14 +26,6 @@ foreach(i RANGE 0 ${EXECUTABLES_COUNT_LOOP})
     list(GET EXECUTABLES ${index2} source)
     add_benchmark(${exe} ${source})
 endforeach()
-
-if(COPLEX_DATA_TYPE EQUAL 0)
-    set(DEFINITION FLOAT_64)
-elseif(COPLEX_DATA_TYPE EQUAL 1)
-    set(DEFINITION FLOAT_32)
-else()
-    message(FATAL_ERROR "Please use valid COPLEX_DATA_TYPE! (0,1)")
-endif()
 
 add_compile_definitions(${DEFINITION})
 

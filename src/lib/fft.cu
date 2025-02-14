@@ -8,29 +8,34 @@
 
 namespace fft
 {
-    __device__ void CooleyTukeyUnit(COMPLEX& U, COMPLEX& V, COMPLEX& root)
+    template <typename T>
+    __device__ void CooleyTukeyUnit(COMPLEX<T>& U, COMPLEX<T>& V,
+                                    COMPLEX<T>& root)
     {
-        COMPLEX u_ = U;
-        COMPLEX v_ = V * root;
+        COMPLEX<T> u_ = U;
+        COMPLEX<T> v_ = V * root;
 
         U = u_ + v_;
         V = u_ - v_;
     }
 
-    __device__ void GentlemanSandeUnit(COMPLEX& U, COMPLEX& V, COMPLEX& root)
+    template <typename T>
+    __device__ void GentlemanSandeUnit(COMPLEX<T>& U, COMPLEX<T>& V,
+                                       COMPLEX<T>& root)
     {
-        COMPLEX u_ = U;
-        COMPLEX v_ = V;
+        COMPLEX<T> u_ = U;
+        COMPLEX<T> v_ = V;
 
         U = (u_ + v_);
         V = (u_ - v_) * root;
     }
 
-    __global__ void ForwardCore(COMPLEX* polynomial,
-                                COMPLEX* root_of_unity_table, int logm,
-                                int outer_iteration_count, int N_power,
-                                bool zero_padding, bool not_last_kernel,
-                                bool reduction_poly_check)
+    template <typename T>
+    __global__ void
+    ForwardCore(COMPLEX<T>* polynomial, COMPLEX<T>* root_of_unity_table,
+                int shared_index, int logm, int outer_iteration_count,
+                int N_power, bool zero_padding, bool not_last_kernel,
+                bool reduction_poly_check)
     {
         const int idx_x = threadIdx.x;
         const int idx_y = threadIdx.y;
@@ -38,11 +43,14 @@ namespace fft
         const int block_y = blockIdx.y;
         const int block_z = blockIdx.z;
 
-        extern __shared__ COMPLEX shared_memory[];
+        // extern __shared__ COMPLEX<T> shared_memory[];
+        extern __shared__ char shared_memory_typed[];
+        COMPLEX<T>* shared_memory =
+            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
 
         int t_2 = N_power - logm - 1;
         location_t offset = 1 << (N_power - logm - 1);
-        int t_ = 8;
+        int t_ = shared_index;
         int loops = outer_iteration_count;
         location_t m = (location_t) 1 << logm;
 
@@ -105,7 +113,7 @@ namespace fft
         else
         {
 #pragma unroll
-            for (int lp = 0; lp < 3; lp++)
+            for (int lp = 0; lp < (shared_index - 5); lp++)
             {
                 //__syncthreads();
 
@@ -165,12 +173,12 @@ namespace fft
             shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
     }
 
-    __global__ void InverseCore(COMPLEX* polynomial,
-                                COMPLEX* inverse_root_of_unity_table, int logm,
-                                int k, int outer_iteration_count, int N_power,
-                                COMPLEX n_inverse, bool last_kernel,
-                                bool NTT_mult, int offset2,
-                                bool reduction_poly_check)
+    template <typename T>
+    __global__ void
+    InverseCore(COMPLEX<T>* polynomial, COMPLEX<T>* inverse_root_of_unity_table,
+                int shared_index, int logm, int k, int outer_iteration_count,
+                int N_power, COMPLEX<T> n_inverse, bool last_kernel,
+                bool NTT_mult, int offset2, bool reduction_poly_check)
     {
         const int idx_x = threadIdx.x;
         const int idx_y = threadIdx.y;
@@ -178,11 +186,14 @@ namespace fft
         const int block_y = blockIdx.y;
         const int block_z = blockIdx.z;
 
-        extern __shared__ COMPLEX shared_memory[];
+        // extern __shared__ COMPLEX<T> shared_memory[];
+        extern __shared__ char shared_memory_typed[];
+        COMPLEX<T>* shared_memory =
+            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
 
         int t_2 = N_power - logm - 1;
         location_t offset = 1 << (N_power - k - 1);
-        int t_ = 9 - outer_iteration_count;
+        int t_ = (shared_index + 1) - outer_iteration_count;
         int loops = outer_iteration_count;
         location_t m = (location_t) 1 << logm;
 
@@ -204,11 +215,11 @@ namespace fft
 
         if (NTT_mult)
         {
-            COMPLEX a0 = polynomial[global_addresss];
-            COMPLEX a1 = polynomial[global_addresss + offset];
+            COMPLEX<T> a0 = polynomial[global_addresss];
+            COMPLEX<T> a1 = polynomial[global_addresss + offset];
 
-            COMPLEX b0 = polynomial[global_addresss + offset2];
-            COMPLEX b1 = polynomial[global_addresss + offset + offset2];
+            COMPLEX<T> b0 = polynomial[global_addresss + offset2];
+            COMPLEX<T> b1 = polynomial[global_addresss + offset + offset2];
 
             shared_memory[shared_addresss] = a0 * b0;
             shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
@@ -270,13 +281,12 @@ namespace fft
         }
     }
 
-    ////////////////////////////
-
-    __global__ void ForwardCore(FIXED_POINT* input, COMPLEX* polynomial,
-                                COMPLEX* root_of_unity_table, int logm,
-                                int outer_iteration_count, int N_power,
-                                bool zero_padding, bool not_last_kernel,
-                                bool reduction_poly_check)
+    template <typename T>
+    __global__ void
+    ForwardCore(T* input, COMPLEX<T>* polynomial,
+                COMPLEX<T>* root_of_unity_table, int shared_index, int logm,
+                int outer_iteration_count, int N_power, bool zero_padding,
+                bool not_last_kernel, bool reduction_poly_check)
     {
         const int idx_x = threadIdx.x;
         const int idx_y = threadIdx.y;
@@ -284,11 +294,14 @@ namespace fft
         const int block_y = blockIdx.y;
         const int block_z = blockIdx.z;
 
-        extern __shared__ COMPLEX shared_memory[];
+        // extern __shared__ COMPLEX<T> shared_memory[];
+        extern __shared__ char shared_memory_typed[];
+        COMPLEX<T>* shared_memory =
+            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
 
         int t_2 = N_power - logm - 1;
         location_t offset = 1 << (N_power - logm - 1);
-        int t_ = 8;
+        int t_ = shared_index;
         int loops = outer_iteration_count;
         location_t m = (location_t) 1 << logm;
 
@@ -309,9 +322,9 @@ namespace fft
 
         // Load data from global & store to shared
 
-        shared_memory[shared_addresss] = COMPLEX(input[global_addresss]);
+        shared_memory[shared_addresss] = COMPLEX<T>(input[global_addresss]);
         shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-            COMPLEX(input[global_addresss + offset]);
+            COMPLEX<T>(input[global_addresss + offset]);
 
         int t = 1 << t_;
         int in_shared_address =
@@ -352,7 +365,7 @@ namespace fft
         else
         {
 #pragma unroll
-            for (int lp = 0; lp < 3; lp++)
+            for (int lp = 0; lp < (shared_index - 5); lp++)
             {
                 //__syncthreads();
 
@@ -412,12 +425,13 @@ namespace fft
             shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
     }
 
-    __global__ void InverseCore(FIXED_POINT* output, COMPLEX* polynomial,
-                                COMPLEX* inverse_root_of_unity_table, int logm,
-                                int k, int outer_iteration_count, int N_power,
-                                COMPLEX n_inverse, bool last_kernel,
-                                bool NTT_mult, int offset2,
-                                bool reduction_poly_check)
+    template <typename T>
+    __global__ void
+    InverseCore(T* output, COMPLEX<T>* polynomial,
+                COMPLEX<T>* inverse_root_of_unity_table, int shared_index,
+                int logm, int k, int outer_iteration_count, int N_power,
+                COMPLEX<T> n_inverse, bool last_kernel, bool NTT_mult,
+                int offset2, bool reduction_poly_check)
     {
         const int idx_x = threadIdx.x;
         const int idx_y = threadIdx.y;
@@ -425,11 +439,14 @@ namespace fft
         const int block_y = blockIdx.y;
         const int block_z = blockIdx.z;
 
-        extern __shared__ COMPLEX shared_memory[];
+        // extern __shared__ COMPLEX<T> shared_memory[];
+        extern __shared__ char shared_memory_typed[];
+        COMPLEX<T>* shared_memory =
+            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
 
         int t_2 = N_power - logm - 1;
         location_t offset = 1 << (N_power - k - 1);
-        int t_ = 9 - outer_iteration_count;
+        int t_ = (shared_index + 1) - outer_iteration_count;
         int loops = outer_iteration_count;
         location_t m = (location_t) 1 << logm;
 
@@ -451,11 +468,11 @@ namespace fft
 
         if (NTT_mult)
         {
-            COMPLEX a0 = polynomial[global_addresss];
-            COMPLEX a1 = polynomial[global_addresss + offset];
+            COMPLEX<T> a0 = polynomial[global_addresss];
+            COMPLEX<T> a1 = polynomial[global_addresss + offset];
 
-            COMPLEX b0 = polynomial[global_addresss + offset2];
-            COMPLEX b1 = polynomial[global_addresss + offset + offset2];
+            COMPLEX<T> b0 = polynomial[global_addresss + offset2];
+            COMPLEX<T> b1 = polynomial[global_addresss + offset + offset2];
 
             shared_memory[shared_addresss] = a0 * b0;
             shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
@@ -519,1255 +536,221 @@ namespace fft
         }
     }
 
-    ////////////////////////////
-
-    __host__ void GPU_FFT(COMPLEX* device_inout, COMPLEX* root_of_unity_table,
-                          fft_configuration cfg, int batch_size,
-                          bool multiplication)
+    template <typename T>
+    __host__ void
+    GPU_FFT(COMPLEX<T>* device_inout, COMPLEX<T>* root_of_unity_table,
+            fft_configuration<T> cfg, int batch_size, bool multiplication)
     {
-        switch (cfg.ntt_type)
+        if ((cfg.n_power <= 11 || cfg.n_power >= 25))
+        {
+            throw std::invalid_argument("Invalid n_power range!");
+        }
+
+        auto kernel_parameters = (cfg.fft_type == FORWARD)
+                                     ? CreateForwardFFTKernel<T>()
+                                     : CreateInverseFFTKernel<T>();
+
+        switch (cfg.fft_type)
         {
             case FORWARD:
-                switch (cfg.n_power)
+                for (int i = 0; i < kernel_parameters[cfg.n_power].size(); i++)
                 {
-                    case 12:
-                        ForwardCore<<<dim3(8, 1, batch_size), dim3(64, 4),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 3,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 8, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 3, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 13:
-                        ForwardCore<<<dim3(16, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 4,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 16, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 14:
-                        ForwardCore<<<dim3(32, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 5,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 32, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 15:
-                        ForwardCore<<<dim3(64, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 6,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 64, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 6, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 16:
-                        ForwardCore<<<dim3(128, 1, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 7,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 128, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 7, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 17:
-                        ForwardCore<<<dim3(256, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 4,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(16, 16, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 4,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 256, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 8, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 18:
-                        ForwardCore<<<dim3(512, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 4,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(32, 16, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 5,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 512, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 9, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 19:
-                        ForwardCore<<<dim3(1024, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 5,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(32, 32, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 5,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 1024, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 10, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 20:
-                        ForwardCore<<<dim3(2048, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 5,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(64, 32, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 6,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 2048, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 11, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 21:
-                        ForwardCore<<<dim3(4096, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 6,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(64, 64, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 6, 6,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 4096, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 12, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 22: //
-                        ForwardCore<<<dim3(8192, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 6,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(128, 64, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 6, 7,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 8192, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 13, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-
-                        break;
-                    case 23:
-                        ForwardCore<<<dim3(16384, 1, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 7,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(128, 128, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 7, 7,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 16384, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 14, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 24:
-                        ForwardCore<<<dim3(32768, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 4,
-                            cfg.n_power, cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(2048, 16, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 4,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(128, 256, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 8, 7,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 32768, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 15, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-
-                    default:
-                        break;
+                    auto& current_kernel_params =
+                        kernel_parameters[cfg.n_power][i];
+                    ForwardCore<<<
+                        dim3(current_kernel_params.griddim_x,
+                             current_kernel_params.griddim_y, batch_size),
+                        dim3(current_kernel_params.blockdim_x,
+                             current_kernel_params.blockdim_y),
+                        current_kernel_params.shared_memory, cfg.stream>>>(
+                        device_inout, root_of_unity_table,
+                        current_kernel_params.shared_index,
+                        current_kernel_params.logm,
+                        current_kernel_params.outer_iteration_count,
+                        cfg.n_power, cfg.zero_padding,
+                        current_kernel_params.not_last_kernel,
+                        (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
+                    FFT_CUDA_CHECK(cudaGetLastError());
                 }
                 break;
             case INVERSE:
-                switch (cfg.n_power)
-                {
-                    case 12:
-                        InverseCore<<<dim3(1, 8, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 11, 3, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(8, 1, batch_size), dim3(64, 4),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 2, 0, 3,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 13:
-                        InverseCore<<<dim3(1, 16, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 12, 4, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(16, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 3, 0, 4,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 14:
-                        InverseCore<<<dim3(1, 32, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 13, 5, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(32, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 0, 5,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 15:
-                        InverseCore<<<dim3(1, 64, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 14, 6, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(64, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 0, 6,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 16:
-                        InverseCore<<<dim3(1, 128, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 15, 7, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(128, 1, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 6, 0, 7,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 17:
-                        InverseCore<<<dim3(1, 256, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 16, 8, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(16, 16, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 7, 4, 4,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(256, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 3, 0, 4,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 18:
-                        InverseCore<<<dim3(1, 512, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 17, 9, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(32, 16, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 8, 4, 5,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(512, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 3, 0, 4,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 19:
-                        InverseCore<<<dim3(1, 1024, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 18, 10, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(32, 32, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 9, 5, 5,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(1024, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 0, 5,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 20:
-                        InverseCore<<<dim3(1, 2048, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 19, 11, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(64, 32, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 10, 5, 6,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(2048, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 0, 5,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 21: //
-                        InverseCore<<<dim3(1, 4096, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 20, 12, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(64, 64, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 11, 6, 6,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(4096, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 0, 6,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 22:
-                        InverseCore<<<dim3(1, 8192, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 21, 13, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(128, 64, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 12, 6, 7,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(8192, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 0, 6,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 23:
-                        InverseCore<<<dim3(1, 16384, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 22, 14, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(128, 128, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 13, 7, 7,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(16384, 1, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 6, 0, 7,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 24:
-                        InverseCore<<<dim3(1, 32768, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 23, 15, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(128, 256, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 14, 8, 7,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(2048, 16, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 7, 4, 4,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(32768, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 3, 0, 4,
-                            cfg.n_power, cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        break;
+            {
+                auto& current_kernel_params = kernel_parameters[cfg.n_power][0];
+                InverseCore<<<dim3(current_kernel_params.griddim_x,
+                                   current_kernel_params.griddim_y, batch_size),
+                              dim3(current_kernel_params.blockdim_x,
+                                   current_kernel_params.blockdim_y),
+                              current_kernel_params.shared_memory,
+                              cfg.stream>>>(
+                    device_inout, root_of_unity_table,
+                    current_kernel_params.shared_index,
+                    current_kernel_params.logm, current_kernel_params.k,
+                    current_kernel_params.outer_iteration_count, cfg.n_power,
+                    cfg.mod_inverse, current_kernel_params.not_last_kernel,
+                    multiplication, (batch_size << cfg.n_power),
+                    (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
+                FFT_CUDA_CHECK(cudaGetLastError());
 
-                    default:
-                        break;
+                for (int i = 1; i < kernel_parameters[cfg.n_power].size(); i++)
+                {
+                    auto& current_kernel_params =
+                        kernel_parameters[cfg.n_power][i];
+                    InverseCore<<<
+                        dim3(current_kernel_params.griddim_x,
+                             current_kernel_params.griddim_y, batch_size),
+                        dim3(current_kernel_params.blockdim_x,
+                             current_kernel_params.blockdim_y),
+                        current_kernel_params.shared_memory, cfg.stream>>>(
+                        device_inout, root_of_unity_table,
+                        current_kernel_params.shared_index,
+                        current_kernel_params.logm, current_kernel_params.k,
+                        current_kernel_params.outer_iteration_count,
+                        cfg.n_power, cfg.mod_inverse,
+                        current_kernel_params.not_last_kernel, false,
+                        (batch_size << cfg.n_power),
+                        (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
+                    FFT_CUDA_CHECK(cudaGetLastError());
                 }
-                break;
+            }
+            break;
 
             default:
                 break;
         }
     }
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    __host__ void GPU_FFT(FIXED_POINT* device_fix_inout,
-                          COMPLEX* device_complex_inout,
-                          COMPLEX* root_of_unity_table, fft_configuration cfg,
-                          int batch_size, bool multiplication)
+    template <typename T>
+    __host__ void
+    GPU_FFT(T* device_fix_inout, COMPLEX<T>* device_Complex64_inout,
+            COMPLEX<T>* root_of_unity_table, fft_configuration<T> cfg,
+            int batch_size, bool multiplication)
     {
-        switch (cfg.ntt_type)
+        if ((cfg.n_power <= 11 || cfg.n_power >= 25))
+        {
+            throw std::invalid_argument("Invalid n_power range!");
+        }
+
+        auto kernel_parameters = (cfg.fft_type == FORWARD)
+                                     ? CreateForwardFFTKernel<T>()
+                                     : CreateInverseFFTKernel<T>();
+
+        switch (cfg.fft_type)
         {
             case FORWARD:
-                switch (cfg.n_power)
+            {
+                auto& current_kernel_params = kernel_parameters[cfg.n_power][0];
+                ForwardCore<<<dim3(current_kernel_params.griddim_x,
+                                   current_kernel_params.griddim_y, batch_size),
+                              dim3(current_kernel_params.blockdim_x,
+                                   current_kernel_params.blockdim_y),
+                              current_kernel_params.shared_memory,
+                              cfg.stream>>>(
+                    device_fix_inout, device_Complex64_inout,
+                    root_of_unity_table, current_kernel_params.shared_index,
+                    current_kernel_params.logm,
+                    current_kernel_params.outer_iteration_count, cfg.n_power,
+                    cfg.zero_padding, current_kernel_params.not_last_kernel,
+                    (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
+                FFT_CUDA_CHECK(cudaGetLastError());
+
+                for (int i = 1; i < kernel_parameters[cfg.n_power].size(); i++)
                 {
-                    case 12:
-                        ForwardCore<<<dim3(8, 1, batch_size), dim3(64, 4),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 3, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 8, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 3, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 13:
-                        ForwardCore<<<dim3(16, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 4, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 16, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 4, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 14:
-                        ForwardCore<<<dim3(32, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 5, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 32, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 5, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 15:
-                        ForwardCore<<<dim3(64, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 6, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 64, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 6, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 16:
-                        ForwardCore<<<dim3(128, 1, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 7, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 128, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 7, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 17:
-                        ForwardCore<<<dim3(256, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 4, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(16, 16, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 4, 4,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 256, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 8, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 18:
-                        ForwardCore<<<dim3(512, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 4, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(32, 16, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 4, 5,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 512, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 9, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 19:
-                        ForwardCore<<<dim3(1024, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 5, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(32, 32, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 5, 5,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 1024, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 10, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 20:
-                        ForwardCore<<<dim3(2048, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 5, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(64, 32, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 5, 6,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 2048, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 11, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 21:
-                        ForwardCore<<<dim3(4096, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 6, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(64, 64, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 6, 6,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 4096, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 12, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 22: //
-                        ForwardCore<<<dim3(8192, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 6, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(128, 64, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 6, 7,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 8192, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 13, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-
-                        break;
-                    case 23:
-                        ForwardCore<<<dim3(16384, 1, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 7, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(128, 128, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 7, 7,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 16384, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 14, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 24:
-                        ForwardCore<<<dim3(32768, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 0, 4, cfg.n_power,
-                            cfg.zero_padding, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(2048, 16, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 4, 4,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(128, 256, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 8, 7,
-                            cfg.n_power, false, true,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        ForwardCore<<<dim3(1, 32768, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 15, 9,
-                            cfg.n_power, false, false,
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-
-                    default:
-                        break;
+                    auto& current_kernel_params =
+                        kernel_parameters[cfg.n_power][i];
+                    ForwardCore<<<
+                        dim3(current_kernel_params.griddim_x,
+                             current_kernel_params.griddim_y, batch_size),
+                        dim3(current_kernel_params.blockdim_x,
+                             current_kernel_params.blockdim_y),
+                        current_kernel_params.shared_memory, cfg.stream>>>(
+                        device_Complex64_inout, root_of_unity_table,
+                        current_kernel_params.shared_index,
+                        current_kernel_params.logm,
+                        current_kernel_params.outer_iteration_count,
+                        cfg.n_power, cfg.zero_padding,
+                        current_kernel_params.not_last_kernel,
+                        (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
+                    FFT_CUDA_CHECK(cudaGetLastError());
                 }
-                break;
+            }
+            break;
             case INVERSE:
-                switch (cfg.n_power)
-                {
-                    case 12:
-                        InverseCore<<<dim3(1, 8, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 11, 3, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(8, 1, batch_size), dim3(64, 4),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 2, 0, 3, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 13:
-                        InverseCore<<<dim3(1, 16, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 12, 4, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(16, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 3, 0, 4, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 14:
-                        InverseCore<<<dim3(1, 32, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 13, 5, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(32, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 4, 0, 5, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 15:
-                        InverseCore<<<dim3(1, 64, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 14, 6, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(64, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 5, 0, 6, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 16:
-                        InverseCore<<<dim3(1, 128, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 15, 7, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(128, 1, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 6, 0, 7, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 17:
-                        InverseCore<<<dim3(1, 256, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 16, 8, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(16, 16, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 7, 4, 4,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(256, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 3, 0, 4, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 18:
-                        InverseCore<<<dim3(1, 512, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 17, 9, 9,
-                            cfg.n_power, cfg.mod_inverse, false, multiplication,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(32, 16, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 8, 4, 5,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(512, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 3, 0, 4, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 19:
-                        InverseCore<<<dim3(1, 1024, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 18, 10,
-                            9, cfg.n_power, cfg.mod_inverse, false,
-                            multiplication, (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(32, 32, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 9, 5, 5,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(1024, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 4, 0, 5, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 20:
-                        InverseCore<<<dim3(1, 2048, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 19, 11,
-                            9, cfg.n_power, cfg.mod_inverse, false,
-                            multiplication, (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(64, 32, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 10, 5, 6,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(2048, 1, batch_size), dim3(16, 16),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 4, 0, 5, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 21: //
-                        InverseCore<<<dim3(1, 4096, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 20, 12,
-                            9, cfg.n_power, cfg.mod_inverse, false,
-                            multiplication, (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(64, 64, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 11, 6, 6,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(4096, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 5, 0, 6, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 22:
-                        InverseCore<<<dim3(1, 8192, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 21, 13,
-                            9, cfg.n_power, cfg.mod_inverse, false,
-                            multiplication, (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(128, 64, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 12, 6, 7,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(8192, 1, batch_size), dim3(8, 32),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 5, 0, 6, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 23:
-                        InverseCore<<<dim3(1, 16384, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 22, 14,
-                            9, cfg.n_power, cfg.mod_inverse, false,
-                            multiplication, (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(128, 128, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 13, 7, 7,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(16384, 1, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 6, 0, 7, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 24:
-                        InverseCore<<<dim3(1, 32768, batch_size), dim3(256, 1),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 23, 15,
-                            9, cfg.n_power, cfg.mod_inverse, false,
-                            multiplication, (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(128, 256, batch_size), dim3(4, 64),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 14, 8, 7,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(2048, 16, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_complex_inout, root_of_unity_table, 7, 4, 4,
-                            cfg.n_power, cfg.mod_inverse, false, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        InverseCore<<<dim3(32768, 1, batch_size), dim3(32, 8),
-                                      512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_fix_inout, device_complex_inout,
-                            root_of_unity_table, 3, 0, 4, cfg.n_power,
-                            cfg.mod_inverse, true, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        break;
+            {
+                auto& current_kernel_params = kernel_parameters[cfg.n_power][0];
+                InverseCore<<<dim3(current_kernel_params.griddim_x,
+                                   current_kernel_params.griddim_y, batch_size),
+                              dim3(current_kernel_params.blockdim_x,
+                                   current_kernel_params.blockdim_y),
+                              current_kernel_params.shared_memory,
+                              cfg.stream>>>(
+                    device_Complex64_inout, root_of_unity_table,
+                    current_kernel_params.shared_index,
+                    current_kernel_params.logm, current_kernel_params.k,
+                    current_kernel_params.outer_iteration_count, cfg.n_power,
+                    cfg.mod_inverse, current_kernel_params.not_last_kernel,
+                    multiplication, (batch_size << cfg.n_power),
+                    (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
+                FFT_CUDA_CHECK(cudaGetLastError());
 
-                    default:
-                        break;
+                for (int i = 1; i < kernel_parameters[cfg.n_power].size(); i++)
+                {
+                    if (i == (kernel_parameters[cfg.n_power].size() - 1))
+                    {
+                        auto& current_kernel_params =
+                            kernel_parameters[cfg.n_power][i];
+                        InverseCore<<<
+                            dim3(current_kernel_params.griddim_x,
+                                 current_kernel_params.griddim_y, batch_size),
+                            dim3(current_kernel_params.blockdim_x,
+                                 current_kernel_params.blockdim_y),
+                            current_kernel_params.shared_memory, cfg.stream>>>(
+                            device_fix_inout, device_Complex64_inout,
+                            root_of_unity_table,
+                            current_kernel_params.shared_index,
+                            current_kernel_params.logm, current_kernel_params.k,
+                            current_kernel_params.outer_iteration_count,
+                            cfg.n_power, cfg.mod_inverse,
+                            current_kernel_params.not_last_kernel, false,
+                            (batch_size << cfg.n_power),
+                            (cfg.reduction_poly ==
+                             ReductionPolynomial::X_N_minus));
+                        FFT_CUDA_CHECK(cudaGetLastError());
+                    }
+                    else
+                    {
+                        auto& current_kernel_params =
+                            kernel_parameters[cfg.n_power][i];
+                        InverseCore<<<
+                            dim3(current_kernel_params.griddim_x,
+                                 current_kernel_params.griddim_y, batch_size),
+                            dim3(current_kernel_params.blockdim_x,
+                                 current_kernel_params.blockdim_y),
+                            current_kernel_params.shared_memory, cfg.stream>>>(
+                            device_Complex64_inout, root_of_unity_table,
+                            current_kernel_params.shared_index,
+                            current_kernel_params.logm, current_kernel_params.k,
+                            current_kernel_params.outer_iteration_count,
+                            cfg.n_power, cfg.mod_inverse,
+                            current_kernel_params.not_last_kernel, false,
+                            (batch_size << cfg.n_power),
+                            (cfg.reduction_poly ==
+                             ReductionPolynomial::X_N_minus));
+                        FFT_CUDA_CHECK(cudaGetLastError());
+                    }
                 }
-                break;
+            }
+            break;
 
             default:
                 break;
         }
     }
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    __global__ void Special_InverseCore(COMPLEX* polynomial,
-                                        COMPLEX* root_of_unity_table, int logm,
-                                        int outer_iteration_count, int N_power,
-                                        COMPLEX n_inverse, bool not_last_kernel)
+    template <typename T>
+    __global__ void
+    Special_InverseCore(COMPLEX<T>* polynomial, COMPLEX<T>* root_of_unity_table,
+                        int shared_index, int logm, int outer_iteration_count,
+                        int N_power, COMPLEX<T> n_inverse, bool not_last_kernel)
     {
         const int idx_x = threadIdx.x;
         const int idx_y = threadIdx.y;
@@ -1775,7 +758,10 @@ namespace fft
         const int block_y = blockIdx.y;
         const int block_z = blockIdx.z;
 
-        extern __shared__ COMPLEX shared_memory[];
+        // extern __shared__ COMPLEX<T> shared_memory[];
+        extern __shared__ char shared_memory_typed[];
+        COMPLEX<T>* shared_memory =
+            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
 
         location_t offset = 1 << (N_power - logm - 1);
         int t_ = 8;
@@ -1889,9 +875,10 @@ namespace fft
         }
     }
 
-    __global__ void Special_ForwardCore(COMPLEX* polynomial,
-                                        COMPLEX* inverse_root_of_unity_table,
-                                        int logm, int k,
+    template <typename T>
+    __global__ void Special_ForwardCore(COMPLEX<T>* polynomial,
+                                        COMPLEX<T>* inverse_root_of_unity_table,
+                                        int shared_index, int logm, int k,
                                         int outer_iteration_count, int N_power)
     {
         const int idx_x = threadIdx.x;
@@ -1900,10 +887,13 @@ namespace fft
         const int block_y = blockIdx.y;
         const int block_z = blockIdx.z;
 
-        extern __shared__ COMPLEX shared_memory[];
+        // extern __shared__ COMPLEX<T> shared_memory[];
+        extern __shared__ char shared_memory_typed[];
+        COMPLEX<T>* shared_memory =
+            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
 
         location_t offset = 1 << (N_power - k - 1);
-        int t_ = 9 - outer_iteration_count;
+        int t_ = (shared_index + 1) - outer_iteration_count;
         int loops = outer_iteration_count;
         location_t m = (location_t) 1 << (N_power - logm - 1);
 
@@ -1957,549 +947,201 @@ namespace fft
             shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
     }
 
-    __host__ void GPU_Special_FFT(COMPLEX* device_inout,
-                                  COMPLEX* root_of_unity_table,
-                                  fft_configuration cfg, int batch_size)
+    template <typename T>
+    __host__ void GPU_Special_FFT(COMPLEX<T>* device_inout,
+                                  COMPLEX<T>* root_of_unity_table,
+                                  fft_configuration<T> cfg, int batch_size)
     {
-        switch (cfg.ntt_type)
+        if ((cfg.n_power <= 10 || cfg.n_power >= 25))
+        {
+            throw std::invalid_argument("Invalid n_power range!");
+        }
+
+        auto kernel_parameters = (cfg.fft_type == FORWARD)
+                                     ? CreateForwardSpecialFFTKernel<T>()
+                                     : CreateInverseSpecialFFTKernel<T>();
+
+        switch (cfg.fft_type)
         {
             case FORWARD:
-                switch (cfg.n_power)
+                for (int i = 0; i < kernel_parameters[cfg.n_power].size(); i++)
                 {
-                    case 11:
-                        Special_ForwardCore<<<
-                            dim3(1, 4, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 10, 2, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(4, 1, batch_size), dim3(128, 2),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 1, 0, 2,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 12:
-                        Special_ForwardCore<<<
-                            dim3(1, 8, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 11, 3, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(8, 1, batch_size), dim3(64, 4),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 2, 0, 3,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 13:
-                        Special_ForwardCore<<<
-                            dim3(1, 16, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 12, 4, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(16, 1, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 3, 0, 4,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 14:
-                        Special_ForwardCore<<<
-                            dim3(1, 32, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 13, 5, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(32, 1, batch_size), dim3(16, 16),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 0, 5,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 15:
-                        Special_ForwardCore<<<
-                            dim3(1, 64, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 14, 6, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(64, 1, batch_size), dim3(8, 32),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 0, 6,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 16:
-                        Special_ForwardCore<<<
-                            dim3(1, 128, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 15, 7, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(128, 1, batch_size), dim3(4, 64),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 6, 0, 7,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 17:
-                        Special_ForwardCore<<<
-                            dim3(1, 256, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 16, 8, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(16, 16, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 7, 4, 4,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(256, 1, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 3, 0, 4,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 18:
-                        Special_ForwardCore<<<
-                            dim3(1, 512, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 17, 9, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(32, 16, batch_size), dim3(16, 16),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 8, 4, 5,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(512, 1, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 3, 0, 4,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 19:
-                        Special_ForwardCore<<<
-                            dim3(1, 1024, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 18, 10, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(32, 32, batch_size), dim3(16, 16),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 9, 5, 5,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(1024, 1, batch_size), dim3(16, 16),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 0, 5,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 20:
-                        Special_ForwardCore<<<
-                            dim3(1, 2048, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 19, 11, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(64, 32, batch_size), dim3(8, 32),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 10, 5, 6,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(2048, 1, batch_size), dim3(16, 16),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 0, 5,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 21: //
-                        Special_ForwardCore<<<
-                            dim3(1, 4096, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 20, 12, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(64, 64, batch_size), dim3(8, 32),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 11, 6, 6,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(4096, 1, batch_size), dim3(8, 32),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 0, 6,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 22:
-                        Special_ForwardCore<<<
-                            dim3(1, 8192, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 21, 13, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(128, 64, batch_size), dim3(4, 64),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 12, 6, 7,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(8192, 1, batch_size), dim3(8, 32),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 0, 6,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 23:
-                        Special_ForwardCore<<<
-                            dim3(1, 16384, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 22, 14, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(128, 128, batch_size), dim3(4, 64),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 13, 7, 7,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(16384, 1, batch_size), dim3(4, 64),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 6, 0, 7,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 24:
-                        Special_ForwardCore<<<
-                            dim3(1, 32768, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 23, 15, 9,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(128, 256, batch_size), dim3(4, 64),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 14, 8, 7,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(2048, 16, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 7, 4, 4,
-                            cfg.n_power);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_ForwardCore<<<
-                            dim3(32768, 1, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 3, 0, 4,
-                            cfg.n_power);
-                        break;
+                    auto& current_kernel_params =
+                        kernel_parameters[cfg.n_power][i];
+                    Special_ForwardCore<<<
+                        dim3(current_kernel_params.griddim_x,
+                             current_kernel_params.griddim_y, batch_size),
+                        dim3(current_kernel_params.blockdim_x,
+                             current_kernel_params.blockdim_y),
+                        current_kernel_params.shared_memory, cfg.stream>>>(
+                        device_inout, root_of_unity_table,
+                        current_kernel_params.shared_index,
+                        current_kernel_params.logm, current_kernel_params.k,
+                        current_kernel_params.outer_iteration_count, cfg.n_power
 
-                    default:
-                        break;
+                    );
+                    FFT_CUDA_CHECK(cudaGetLastError());
                 }
                 break;
             case INVERSE:
-                switch (cfg.n_power)
+            {
+                for (int i = 0; i < kernel_parameters[cfg.n_power].size() - 1;
+                     i++)
                 {
-                    case 11:
-                        Special_InverseCore<<<
-                            dim3(4, 1, batch_size), dim3(128, 2),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 2,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 4, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 2, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 12:
-                        Special_InverseCore<<<
-                            dim3(8, 1, batch_size), dim3(64, 4),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 3,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 8, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 3, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 13:
-                        Special_InverseCore<<<
-                            dim3(16, 1, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 4,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 16, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 14:
-                        Special_InverseCore<<<
-                            dim3(32, 1, batch_size), dim3(16, 16),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 5,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 32, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 15:
-                        Special_InverseCore<<<
-                            dim3(64, 1, batch_size), dim3(8, 32),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 6,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 64, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 6, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 16:
-                        Special_InverseCore<<<
-                            dim3(128, 1, batch_size), dim3(4, 64),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 7,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 128, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 7, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 17:
-                        Special_InverseCore<<<
-                            dim3(256, 1, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 4,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(16, 16, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 4,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 256, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 8, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 18:
-                        Special_InverseCore<<<
-                            dim3(512, 1, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 4,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(32, 16, batch_size), dim3(16, 16),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 5,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 512, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 9, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 19:
-                        Special_InverseCore<<<
-                            dim3(1024, 1, batch_size), dim3(16, 16),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 5,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(32, 32, batch_size), dim3(16, 16),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 5,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 1024, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 10, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 20:
-                        Special_InverseCore<<<
-                            dim3(2048, 1, batch_size), dim3(16, 16),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 5,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(64, 32, batch_size), dim3(8, 32),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 5, 6,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 2048, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 11, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 21:
-                        Special_InverseCore<<<
-                            dim3(4096, 1, batch_size), dim3(8, 32),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 6,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(64, 64, batch_size), dim3(8, 32),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 6, 6,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 4096, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 12, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 22: //
-                        Special_InverseCore<<<
-                            dim3(8192, 1, batch_size), dim3(8, 32),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 6,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(128, 64, batch_size), dim3(4, 64),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 6, 7,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 8192, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 13, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-
-                        break;
-                    case 23:
-                        Special_InverseCore<<<
-                            dim3(16384, 1, batch_size), dim3(4, 64),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 7,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(128, 128, batch_size), dim3(4, 64),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 7, 7,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 16384, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 14, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-                    case 24:
-                        Special_InverseCore<<<
-                            dim3(32768, 1, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 0, 4,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(2048, 16, batch_size), dim3(32, 8),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 4, 4,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(128, 256, batch_size), dim3(4, 64),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 8, 7,
-                            cfg.n_power, cfg.mod_inverse, true);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        Special_InverseCore<<<
-                            dim3(1, 32768, batch_size), dim3(256, 1),
-                            512 * sizeof(COMPLEX), cfg.stream>>>(
-                            device_inout, root_of_unity_table, 15, 9,
-                            cfg.n_power, cfg.mod_inverse, false);
-                        FFT_CUDA_CHECK(cudaGetLastError());
-                        break;
-
-                    default:
-                        break;
+                    auto& current_kernel_params =
+                        kernel_parameters[cfg.n_power][i];
+                    Special_InverseCore<<<
+                        dim3(current_kernel_params.griddim_x,
+                             current_kernel_params.griddim_y, batch_size),
+                        dim3(current_kernel_params.blockdim_x,
+                             current_kernel_params.blockdim_y),
+                        current_kernel_params.shared_memory, cfg.stream>>>(
+                        device_inout, root_of_unity_table,
+                        current_kernel_params.shared_index,
+                        current_kernel_params.logm,
+                        current_kernel_params.outer_iteration_count,
+                        cfg.n_power, cfg.mod_inverse, true);
+                    FFT_CUDA_CHECK(cudaGetLastError());
                 }
-                break;
+
+                auto& current_kernel_params =
+                    kernel_parameters[cfg.n_power]
+                                     [kernel_parameters[cfg.n_power].size() -
+                                      1];
+                Special_InverseCore<<<
+                    dim3(current_kernel_params.griddim_x,
+                         current_kernel_params.griddim_y, batch_size),
+                    dim3(current_kernel_params.blockdim_x,
+                         current_kernel_params.blockdim_y),
+                    current_kernel_params.shared_memory, cfg.stream>>>(
+                    device_inout, root_of_unity_table,
+                    current_kernel_params.shared_index,
+                    current_kernel_params.logm,
+                    current_kernel_params.outer_iteration_count, cfg.n_power,
+                    cfg.mod_inverse, false);
+                FFT_CUDA_CHECK(cudaGetLastError());
+            }
+            break;
 
             default:
                 break;
         }
     }
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    template __device__ void CooleyTukeyUnit(Complex32& U, Complex32& V,
+                                             Complex32& root);
+    template __device__ void CooleyTukeyUnit(Complex64& U, Complex64& V,
+                                             Complex64& root);
 
-    __global__ void GPU_ACTIVITY(unsigned long long* output,
-                                 unsigned long long fix_num)
-    {
-        int idx = blockIdx.x + blockDim.x + threadIdx.x;
+    template __device__ void GentlemanSandeUnit(Complex32& U, Complex32& V,
+                                                Complex32& root);
+    template __device__ void GentlemanSandeUnit(Complex64& U, Complex64& V,
+                                                Complex64& root);
 
-        output[idx] = fix_num;
-    }
+    template __global__ void
+    ForwardCore(Complex32* polynomial, Complex32* root_of_unity_table,
+                int shared_index, int logm, int outer_iteration_count,
+                int N_power, bool zero_padding, bool not_last_kernel,
+                bool reduction_poly_check);
 
-    __host__ void GPU_ACTIVITY_HOST(unsigned long long* output,
-                                    unsigned long long fix_num)
-    {
-        GPU_ACTIVITY<<<64, 512>>>(output, fix_num);
-    }
+    template __global__ void
+    ForwardCore(Complex64* polynomial, Complex64* root_of_unity_table,
+                int shared_index, int logm, int outer_iteration_count,
+                int N_power, bool zero_padding, bool not_last_kernel,
+                bool reduction_poly_check);
+
+    template __global__ void
+    InverseCore(Complex32* polynomial, Complex32* inverse_root_of_unity_table,
+                int shared_index, int logm, int k, int outer_iteration_count,
+                int N_power, Complex32 n_inverse, bool last_kernel,
+                bool NTT_mult, int offset2, bool reduction_poly_check);
+
+    template __global__ void
+    InverseCore(Complex64* polynomial, Complex64* inverse_root_of_unity_table,
+                int shared_index, int logm, int k, int outer_iteration_count,
+                int N_power, Complex64 n_inverse, bool last_kernel,
+                bool NTT_mult, int offset2, bool reduction_poly_check);
+
+    template __global__ void
+    ForwardCore(Float32* input, Complex32* polynomial,
+                Complex32* root_of_unity_table, int shared_index, int logm,
+                int outer_iteration_count, int N_power, bool zero_padding,
+                bool not_last_kernel, bool reduction_poly_check);
+
+    template __global__ void
+    ForwardCore(Float64* input, Complex64* polynomial,
+                Complex64* root_of_unity_table, int shared_index, int logm,
+                int outer_iteration_count, int N_power, bool zero_padding,
+                bool not_last_kernel, bool reduction_poly_check);
+
+    template __global__ void InverseCore(Float32* output, Complex32* polynomial,
+                                         Complex32* inverse_root_of_unity_table,
+                                         int shared_index, int logm, int k,
+                                         int outer_iteration_count, int N_power,
+                                         Complex32 n_inverse, bool last_kernel,
+                                         bool NTT_mult, int offset2,
+                                         bool reduction_poly_check);
+
+    template __global__ void InverseCore(Float64* output, Complex64* polynomial,
+                                         Complex64* inverse_root_of_unity_table,
+                                         int shared_index, int logm, int k,
+                                         int outer_iteration_count, int N_power,
+                                         Complex64 n_inverse, bool last_kernel,
+                                         bool NTT_mult, int offset2,
+                                         bool reduction_poly_check);
+
+    template __host__ void GPU_FFT(Complex32* device_inout,
+                                   Complex32* root_of_unity_table,
+                                   fft_configuration<Float32> cfg,
+                                   int batch_size, bool multiplication);
+
+    template __host__ void GPU_FFT(Complex64* device_inout,
+                                   Complex64* root_of_unity_table,
+                                   fft_configuration<Float64> cfg,
+                                   int batch_size, bool multiplication);
+
+    template __host__ void GPU_FFT(Float32* device_fix_inout,
+                                   Complex32* device_Complex64_inout,
+                                   Complex32* root_of_unity_table,
+                                   fft_configuration<Float32> cfg,
+                                   int batch_size, bool multiplication);
+
+    template __host__ void GPU_FFT(Float64* device_fix_inout,
+                                   Complex64* device_Complex64_inout,
+                                   Complex64* root_of_unity_table,
+                                   fft_configuration<Float64> cfg,
+                                   int batch_size, bool multiplication);
+
+    template __global__ void
+    Special_ForwardCore(Complex32* polynomial,
+                        Complex32* inverse_root_of_unity_table,
+                        int shared_index, int logm, int k,
+                        int outer_iteration_count, int N_power);
+
+    template __global__ void
+    Special_ForwardCore(Complex64* polynomial,
+                        Complex64* inverse_root_of_unity_table,
+                        int shared_index, int logm, int k,
+                        int outer_iteration_count, int N_power);
+
+    template __global__ void
+    Special_InverseCore(Complex32* polynomial, Complex32* root_of_unity_table,
+                        int shared_index, int logm, int outer_iteration_count,
+                        int N_power, Complex32 n_inverse, bool not_last_kernel);
+
+    template __global__ void
+    Special_InverseCore(Complex64* polynomial, Complex64* root_of_unity_table,
+                        int shared_index, int logm, int outer_iteration_count,
+                        int N_power, Complex64 n_inverse, bool not_last_kernel);
+
+    template __host__ void GPU_Special_FFT(Complex32* device_inout,
+                                           Complex32* root_of_unity_table,
+                                           fft_configuration<Float32> cfg,
+                                           int batch_size);
+
+    template __host__ void GPU_Special_FFT(Complex64* device_inout,
+                                           Complex64* root_of_unity_table,
+                                           fft_configuration<Float64> cfg,
+                                           int batch_size);
 
 } // namespace fft

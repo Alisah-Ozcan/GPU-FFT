@@ -18,26 +18,12 @@ set_target_properties(fft PROPERTIES
   OUTPUT_NAME "fft-${PROJECT_VERSION}"
 )
 
-if(NOT DEFINED COPLEX_DATA_TYPE)
-    set(COPLEX_DATA_TYPE 0)
-endif()
-
 target_include_directories(
     fft
     PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include/GPUFFT-${PROJECT_VERSION}>
 )
-
-if(COPLEX_DATA_TYPE EQUAL 0)
-    add_compile_definitions(FLOAT_64)
-    target_compile_definitions(fft PRIVATE FLOAT_64)
-elseif(COPLEX_DATA_TYPE EQUAL 1)
-    add_compile_definitions(FLOAT_32)
-    target_compile_definitions(fft PRIVATE FLOAT_32)
-else()
-    message(FATAL_ERROR "Please use valid COPLEX_DATA_TYPE! (0,1)")
-endif()
 
 set_target_properties(fft PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON

@@ -3,124 +3,248 @@
 // SPDX-License-Identifier: Apache-2.0
 // Developer: Alişah Özcan
 
-#ifndef COMPLEX_ARITHMATIC_H
-#define COMPLEX_ARITHMATIC_H
+#ifndef COMPLEX_ARITHMETIC_H
+#define COMPLEX_ARITHMETIC_H
 
+#include <iostream>
 #include <complex>
 #include <vector>
 #include "cuda_runtime.h"
 
-#ifdef FLOAT_64
-typedef std::complex<double> COMPLEX_C;
-typedef double FIXED_POINT;
-typedef double2 FIXED_POINT2;
-#elif defined(FLOAT_32)
-typedef std::complex<float> COMPLEX_C;
-typedef float FIXED_POINT;
-typedef float2 FIXED_POINT2;
-#else
-#error                                                                         \
-    "Please define either USE_FLOAT or USE_DOUBLE to choose the complex type."
-#endif
+template <typename T>
+using fp2 = typename std::conditional<std::is_same<T, float>::value, float2,
+                                      double2>::type;
 
-namespace complex_fix_point
+typedef float Float32;
+typedef double Float64;
+
+template <typename T>
+using Float = typename std::conditional<std::is_same<T, float>::value, Float32,
+                                        Float64>::type;
+
+namespace complex_arithmetic
 {
-
     // Define the Complex structure
-    struct Complex
+    template <typename T1> struct ComplexOperations
     {
-        FIXED_POINT2 data;
-        __host__ __device__ __forceinline__ FIXED_POINT& real()
+        fp2<T1> data;
+
+        __host__ __device__ __forceinline__ T1& real() { return data.x; }
+        __host__ __device__ __forceinline__ T1& imag() { return data.y; }
+        __host__ __device__ __forceinline__ const T1& real() const
         {
             return data.x;
         }
-        __host__ __device__ __forceinline__ FIXED_POINT& imag()
-        {
-            return data.y;
-        }
-        __host__ __device__ __forceinline__ const FIXED_POINT& real() const
-        {
-            return data.x;
-        } //
-        __host__ __device__ __forceinline__ const FIXED_POINT& imag() const
+        __host__ __device__ __forceinline__ const T1& imag() const
         {
             return data.y;
         }
 
         // Constructor to initialize the complex number
-        __host__ __device__ __forceinline__ Complex(FIXED_POINT r,
-                                                    FIXED_POINT i)
-            : data({r, i})
+        template <typename T2>
+        __host__ __device__ __forceinline__ ComplexOperations(T2 r, T2 i)
         {
+            data.x = static_cast<T1>(r);
+            data.y = static_cast<T1>(i);
         }
 
         // Constructor to initialize the complex number with real number
-        __host__ __device__ __forceinline__ Complex(FIXED_POINT r)
-            : data({r, 0.0})
+        template <typename T2>
+        __host__ __device__ __forceinline__ ComplexOperations(T2 r)
+        {
+            data.x = static_cast<T1>(r);
+            data.y = static_cast<T1>(0.0);
+        }
+
+        __host__ __device__ __forceinline__ ComplexOperations()
+            : data({0.0, 0.0})
         {
         }
 
-        __host__ __device__ __forceinline__ Complex() : data({0.0, 0.0}) {}
-
-        // Overload the addition operator (+) within the namespace
-        __device__ __forceinline__ Complex operator+(const Complex& other) const
+        // Complex addition operator (+)
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator+(const ComplexOperations& other) const
         {
-            return Complex(real() + other.real(), imag() + other.imag());
+            return ComplexOperations(real() + other.real(),
+                                     imag() + other.imag());
         }
 
-        // Overload the subtraction operator (-) within the namespace
-        __device__ __forceinline__ Complex operator-(const Complex& other) const
+        // Complex addition and equal operator (+=)
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator+=(const ComplexOperations& other) const
         {
-            return Complex(real() - other.real(), imag() - other.imag());
+            real() += other.real();
+            imag() += other.imag();
+            return *this;
         }
 
-        // Overload the multiplication operator (*) within the namespace
-        __device__ __forceinline__ Complex operator*(const Complex& other) const
+        // Complex, scalar addition operator (+)
+        template <typename T2>
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator+(const T2& other) const
         {
-            return Complex(real() * other.real() - imag() * other.imag(),
-                           real() * other.imag() + imag() * other.real());
+            return ComplexOperations(real() + static_cast<T1>(other), imag());
         }
 
-        // Overload the division operator (/) within the namespace
-        __device__ __forceinline__ Complex operator/(const Complex& other) const
+        // Complex, scalar addition and equal operator (+=)
+        template <typename T2>
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator+=(const T2& other) const
         {
-            FIXED_POINT denominator =
+            real() += static_cast<T1>(other);
+            return *this;
+        }
+
+        // Complex subtraction operator (-)
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator-(const ComplexOperations& other) const
+        {
+            return ComplexOperations(real() - other.real(),
+                                     imag() - other.imag());
+        }
+
+        // Complex subtraction and equal operator (-=)
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator-=(const ComplexOperations& other) const
+        {
+            real() -= other.real();
+            imag() -= other.imag();
+            return *this;
+        }
+
+        // Complex, scalar subtraction operator (-)
+        template <typename T2>
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator-(const T2& other) const
+        {
+            return ComplexOperations(real() - static_cast<T1>(other), imag());
+        }
+
+        // Complex, scalar subtraction and equal operator (-=)
+        template <typename T2>
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator-=(const T2& other) const
+        {
+            real() -= static_cast<T1>(other);
+            return *this;
+        }
+
+        // Complex multiplication operator (*)
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator*(const ComplexOperations& other) const
+        {
+            return ComplexOperations(
+                real() * other.real() - imag() * other.imag(),
+                real() * other.imag() + imag() * other.real());
+        }
+
+        // Complex multiplication equal operator (*=)
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator*=(const ComplexOperations& other) const
+        {
+            T1 r = real() * other.real() - imag() * other.imag();
+            T1 i = real() * other.imag() + imag() * other.real();
+            real() = r;
+            imag() = i;
+            return *this;
+        }
+
+        // Complex, scalar multiplication operator (*)
+        template <typename T2>
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator*(const T2& other) const
+        {
+            return ComplexOperations(real() * static_cast<T1>(other),
+                                     real() * static_cast<T1>(other));
+        }
+
+        // Complex, scalar multiplication equal operator (*=)
+        template <typename T2>
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator*=(const T2& other) const
+        {
+            real() *= static_cast<T1>(other);
+            imag() *= static_cast<T1>(other);
+            return *this;
+        }
+
+        // Complex division operator (/)
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator/(const ComplexOperations& other) const
+        {
+            T1 denominator =
                 other.real() * other.real() + other.imag() * other.imag();
-            return Complex(
+            return ComplexOperations(
                 (real() * other.real() + imag() * other.imag()) / denominator,
                 (imag() * other.real() - real() * other.imag()) / denominator);
         }
 
-        // Overload the Conjugate of complex number within the namespace
-        __device__ __forceinline__ Complex conjugate() const
+        // Complex division operator (/=)
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator/=(const ComplexOperations& other) const
         {
-            return Complex(real(), -imag());
+            T1 denominator =
+                other.real() * other.real() + other.imag() * other.imag();
+            T1 r =
+                (real() * other.real() + imag() * other.imag()) / denominator;
+            T1 i =
+                (imag() * other.real() - real() * other.imag()) / denominator;
+            real() = r;
+            imag() = i;
+            return *this;
         }
 
-        // Overload the Negate of complex number within the namespace
-        __device__ __forceinline__ Complex negate() const
+        // Complex, scalar division operator (/)
+        template <typename T2>
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator/(const T2& other) const
         {
-            return Complex(-real(), -imag());
+            return ComplexOperations(real() / static_cast<T1>(other),
+                                     imag() / static_cast<T1>(other));
         }
 
-        // Overload the Square of complex number within the namespace
-        __device__ __forceinline__ FIXED_POINT square() const
+        // Complex, scalar division operator (/=)
+        template <typename T2>
+        __host__ __device__ __forceinline__ ComplexOperations
+        operator/=(const T2& other) const
+        {
+            real() /= static_cast<T1>(other);
+            imag() /= static_cast<T1>(other);
+            return *this;
+        }
+
+        // Complex Conjugate of complex number
+        __host__ __device__ __forceinline__ ComplexOperations conjugate() const
+        {
+            return ComplexOperations(real(), -imag());
+        }
+
+        // Complex Negate of complex number
+        __host__ __device__ __forceinline__ ComplexOperations negate() const
+        {
+            return ComplexOperations(-real(), -imag());
+        }
+
+        // Complex Square of complex number
+        __host__ __device__ __forceinline__ T1 square() const
         {
             return real() * real() + imag() * imag();
         }
 
-        // Overload the Inverse of complex number within the namespace
-        __device__ __forceinline__ Complex inverse() const
+        // Complex Inverse of complex number
+        __host__ __device__ __forceinline__ ComplexOperations inverse() const
         {
-            FIXED_POINT squared = square();
-            Complex conj = conjugate();
-            return Complex(conj.real() / squared, conj.imag() / squared);
+            T1 squared = square();
+            ComplexOperations conj = conjugate();
+            return ComplexOperations(conj.real() / squared,
+                                     conj.imag() / squared);
         }
 
-        // Overload the Exponentiation of complex number within the namespace
-        __device__ __forceinline__ Complex exp(int& exponent) const
+        // Complex Exponentiation of complex number
+        __host__ __device__ __forceinline__ ComplexOperations
+        exp(int& exponent) const
         {
-            Complex result(1.0, 0);
+            ComplexOperations result(1.0, 0.0);
 
             if (exponent == 0)
             {
@@ -141,11 +265,11 @@ namespace complex_fix_point
             return result;
         }
 
-        // Overload the Exponentiation of complex number within the namespace
-        __device__ __forceinline__ Complex
+        // Complex Exponentiation of complex number
+        __host__ __device__ __forceinline__ ComplexOperations
         exp(unsigned long long& exponent) const
         {
-            Complex result(1.0, 0);
+            ComplexOperations result(1.0, 0);
 
             if (exponent == 0ULL)
             {
@@ -165,10 +289,32 @@ namespace complex_fix_point
 
             return result;
         }
+
+        friend __host__ std::ostream& operator<<(std::ostream& out,
+                                                 const ComplexOperations& c)
+        {
+            out << c.real();
+            if (c.imag() >= 0)
+                out << " + " << c.imag() << "i";
+            else
+                out << " - " << -c.imag() << "i";
+            return out;
+        }
     };
 
-} // namespace complex_fix_point
+    template <typename T>
+    ComplexOperations<T> exp(const ComplexOperations<T>& input)
+    {
+        T exp_real = std::exp(input.real());
+        return ComplexOperations<T>(exp_real * std::cos(input.imag()),
+                                    exp_real * std::sin(input.imag()));
+    }
 
-typedef complex_fix_point::Complex COMPLEX;
+} // namespace complex_arithmetic
 
-#endif // COMPLEX_ARITHMATIC_H
+template <typename T> using COMPLEX = complex_arithmetic::ComplexOperations<T>;
+
+typedef COMPLEX<Float32> Complex32;
+typedef COMPLEX<Float64> Complex64;
+
+#endif // COMPLEX_ARITHMETIC_H

@@ -71,22 +71,22 @@ int main(int argc, char* argv[])
         }
     }
 
-    std::vector<std::vector<COMPLEX_C>> A_vec(batch,
-                                              std::vector<COMPLEX_C>(n * 2));
-    std::vector<std::vector<COMPLEX_C>> B_vec(batch,
-                                              std::vector<COMPLEX_C>(n * 2));
+    std::vector<std::vector<Complex64>> A_vec(batch,
+                                              std::vector<Complex64>(n * 2));
+    std::vector<std::vector<Complex64>> B_vec(batch,
+                                              std::vector<Complex64>(n * 2));
 
-    std::vector<std::vector<COMPLEX_C>> vec_GPU(
-        2 * batch, std::vector<COMPLEX_C>(n * 2)); // A and B together
+    std::vector<std::vector<Complex64>> vec_GPU(
+        2 * batch, std::vector<Complex64>(n * 2)); // A and B together
 
     for (int j = 0; j < batch; j++)
     {
         for (int i = 0; i < n * 2; i++)
         {
-            COMPLEX_C A_element = A_poly[j][i];
+            Complex64 A_element = A_poly[j][i];
             A_vec[j][i] = A_element;
 
-            COMPLEX_C B_element = B_poly[j][i];
+            Complex64 B_element = B_poly[j][i];
             B_vec[j][i] = B_element;
         }
     }
@@ -95,7 +95,7 @@ int main(int argc, char* argv[])
     { // LOAD A
         for (int i = 0; i < n * 2; i++)
         {
-            COMPLEX_C element = A_poly[j][i];
+            Complex64 element = A_poly[j][i];
             vec_GPU[j][i] = element;
         }
     }
@@ -104,12 +104,12 @@ int main(int argc, char* argv[])
     { // LOAD B
         for (int i = 0; i < n * 2; i++)
         {
-            COMPLEX_C element = B_poly[j][i];
+            Complex64 element = B_poly[j][i];
             vec_GPU[j + batch][i] = element;
         }
     }
 
-    FFT fft_generator(n);
+    FFT<Float64> fft_generator(n);
 
     for (int j = 0; j < batch; j++)
     {
