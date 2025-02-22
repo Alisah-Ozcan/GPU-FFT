@@ -12,7 +12,7 @@
 #include "fft_cpu.cuh"
 
 using namespace std;
-using namespace fft;
+using namespace gpufft;
 
 int q;
 int logn;
@@ -71,12 +71,12 @@ int main(int argc, char* argv[])
 
         Complex64* Forward_InOut_Datas;
 
-        FFT_CUDA_CHECK(cudaMalloc(&Forward_InOut_Datas,
-                                  batch * n * 2 * sizeof(Complex64)));
+        GPUFFT_CUDA_CHECK(cudaMalloc(&Forward_InOut_Datas,
+                                     batch * n * 2 * sizeof(Complex64)));
 
         for (int j = 0; j < batch; j++)
         {
-            FFT_CUDA_CHECK(
+            GPUFFT_CUDA_CHECK(
                 cudaMemcpy(Forward_InOut_Datas + (n * 2 * j), vec_GPU[j].data(),
                            n * 2 * sizeof(Complex64), cudaMemcpyHostToDevice));
         }
@@ -84,33 +84,34 @@ int main(int argc, char* argv[])
 
         Complex64* Root_Table_Device;
 
-        FFT_CUDA_CHECK(cudaMalloc(&Root_Table_Device, n * sizeof(Complex64)));
+        GPUFFT_CUDA_CHECK(
+            cudaMalloc(&Root_Table_Device, n * sizeof(Complex64)));
 
         vector<Complex64> reverse_table = fft_generator.ReverseRootTable();
-        FFT_CUDA_CHECK(cudaMemcpy(Root_Table_Device, reverse_table.data(),
-                                  n * sizeof(Complex64),
-                                  cudaMemcpyHostToDevice));
+        GPUFFT_CUDA_CHECK(cudaMemcpy(Root_Table_Device, reverse_table.data(),
+                                     n * sizeof(Complex64),
+                                     cudaMemcpyHostToDevice));
 
         /////////////////////////////////////////////////////////////////////////
 
         Complex64* Inverse_Root_Table_Device;
 
-        FFT_CUDA_CHECK(
+        GPUFFT_CUDA_CHECK(
             cudaMalloc(&Inverse_Root_Table_Device, n * sizeof(Complex64)));
 
         vector<Complex64> inverse_reverse_table =
             fft_generator.InverseReverseRootTable();
-        FFT_CUDA_CHECK(
+        GPUFFT_CUDA_CHECK(
             cudaMemcpy(Inverse_Root_Table_Device, inverse_reverse_table.data(),
                        n * sizeof(Complex64), cudaMemcpyHostToDevice));
 
         /////////////////////////////////////////////////////////////////////////
 
         unsigned long long* activity_output;
-        FFT_CUDA_CHECK(cudaMalloc(&activity_output,
-                                  64 * 512 * sizeof(unsigned long long)));
+        GPUFFT_CUDA_CHECK(cudaMalloc(&activity_output,
+                                     64 * 512 * sizeof(unsigned long long)));
         GPU_ACTIVITY_HOST(activity_output, 111111);
-        FFT_CUDA_CHECK(cudaFree(activity_output));
+        GPUFFT_CUDA_CHECK(cudaFree(activity_output));
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -138,9 +139,9 @@ int main(int argc, char* argv[])
         // cout << time << ", " ;
 
         time_measurements[loop] = time;
-        FFT_CUDA_CHECK(cudaFree(Forward_InOut_Datas));
-        FFT_CUDA_CHECK(cudaFree(Root_Table_Device));
-        FFT_CUDA_CHECK(cudaFree(Inverse_Root_Table_Device));
+        GPUFFT_CUDA_CHECK(cudaFree(Forward_InOut_Datas));
+        GPUFFT_CUDA_CHECK(cudaFree(Root_Table_Device));
+        GPUFFT_CUDA_CHECK(cudaFree(Inverse_Root_Table_Device));
     }
 
     cout << endl

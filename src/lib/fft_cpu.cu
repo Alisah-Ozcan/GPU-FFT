@@ -5,7 +5,7 @@
 
 #include "fft_cpu.cuh"
 
-namespace fft
+namespace gpufft
 {
 
     int bitreverse(int index, int n_power)
@@ -205,4 +205,4 @@ namespace fft
 
     template class FFT<Float32>;
     template class FFT<Float64>;
-} // namespace fft
+} // namespace gpufft

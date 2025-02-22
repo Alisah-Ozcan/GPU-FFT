@@ -6,7 +6,7 @@
 
 #include "fft.cuh"
 
-namespace fft
+namespace gpufft
 {
     template <typename T>
     __device__ void CooleyTukeyUnit(COMPLEX<T>& U, COMPLEX<T>& V,
@@ -570,7 +570,7 @@ namespace fft
                         cfg.n_power, cfg.zero_padding,
                         current_kernel_params.not_last_kernel,
                         (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                    FFT_CUDA_CHECK(cudaGetLastError());
+                    GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
                 break;
             case INVERSE:
@@ -589,7 +589,7 @@ namespace fft
                     cfg.mod_inverse, current_kernel_params.not_last_kernel,
                     multiplication, (batch_size << cfg.n_power),
                     (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                FFT_CUDA_CHECK(cudaGetLastError());
+                GPUFFT_CUDA_CHECK(cudaGetLastError());
 
                 for (int i = 1; i < kernel_parameters[cfg.n_power].size(); i++)
                 {
@@ -609,7 +609,7 @@ namespace fft
                         current_kernel_params.not_last_kernel, false,
                         (batch_size << cfg.n_power),
                         (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                    FFT_CUDA_CHECK(cudaGetLastError());
+                    GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
             }
             break;
@@ -651,7 +651,7 @@ namespace fft
                     current_kernel_params.outer_iteration_count, cfg.n_power,
                     cfg.zero_padding, current_kernel_params.not_last_kernel,
                     (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                FFT_CUDA_CHECK(cudaGetLastError());
+                GPUFFT_CUDA_CHECK(cudaGetLastError());
 
                 for (int i = 1; i < kernel_parameters[cfg.n_power].size(); i++)
                 {
@@ -670,7 +670,7 @@ namespace fft
                         cfg.n_power, cfg.zero_padding,
                         current_kernel_params.not_last_kernel,
                         (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                    FFT_CUDA_CHECK(cudaGetLastError());
+                    GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
             }
             break;
@@ -690,7 +690,7 @@ namespace fft
                     cfg.mod_inverse, current_kernel_params.not_last_kernel,
                     multiplication, (batch_size << cfg.n_power),
                     (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                FFT_CUDA_CHECK(cudaGetLastError());
+                GPUFFT_CUDA_CHECK(cudaGetLastError());
 
                 for (int i = 1; i < kernel_parameters[cfg.n_power].size(); i++)
                 {
@@ -714,7 +714,7 @@ namespace fft
                             (batch_size << cfg.n_power),
                             (cfg.reduction_poly ==
                              ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
+                        GPUFFT_CUDA_CHECK(cudaGetLastError());
                     }
                     else
                     {
@@ -735,7 +735,7 @@ namespace fft
                             (batch_size << cfg.n_power),
                             (cfg.reduction_poly ==
                              ReductionPolynomial::X_N_minus));
-                        FFT_CUDA_CHECK(cudaGetLastError());
+                        GPUFFT_CUDA_CHECK(cudaGetLastError());
                     }
                 }
             }
@@ -980,7 +980,7 @@ namespace fft
                         current_kernel_params.outer_iteration_count, cfg.n_power
 
                     );
-                    FFT_CUDA_CHECK(cudaGetLastError());
+                    GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
                 break;
             case INVERSE:
@@ -1001,7 +1001,7 @@ namespace fft
                         current_kernel_params.logm,
                         current_kernel_params.outer_iteration_count,
                         cfg.n_power, cfg.mod_inverse, true);
-                    FFT_CUDA_CHECK(cudaGetLastError());
+                    GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
 
                 auto& current_kernel_params =
@@ -1019,7 +1019,7 @@ namespace fft
                     current_kernel_params.logm,
                     current_kernel_params.outer_iteration_count, cfg.n_power,
                     cfg.mod_inverse, false);
-                FFT_CUDA_CHECK(cudaGetLastError());
+                GPUFFT_CUDA_CHECK(cudaGetLastError());
             }
             break;
 
@@ -1144,4 +1144,4 @@ namespace fft
                                            fft_configuration<Float64> cfg,
                                            int batch_size);
 
-} // namespace fft
+} // namespace gpufft

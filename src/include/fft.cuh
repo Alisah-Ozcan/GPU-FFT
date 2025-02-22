@@ -24,7 +24,7 @@
 // Authors: Alisah Ozcan
 // --------------------- //
 
-namespace fft
+namespace gpufft
 {
     typedef unsigned location_t;
     /*
@@ -406,5 +406,5 @@ namespace fft
                false}}}};
     }
 
-} // namespace fft
+} // namespace gpufft
 #endif // FFT_CORE_H

@@ -12,7 +12,7 @@
 #include "fft_cpu.cuh"
 
 using namespace std;
-using namespace fft;
+using namespace gpufft;
 
 int q;
 int logn;

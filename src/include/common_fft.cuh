@@ -3,7 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Developer: Alişah Özcan
 
-#pragma once
+#ifndef COMMON_FFT_H
+#define COMMON_FFT_H
+
 #include <cuda_runtime.h>
 
 #include <cassert>
@@ -11,7 +13,7 @@
 #include <iostream>
 #include <string>
 
-namespace fft
+namespace gpufft
 {
 
     class CudaException : public std::exception
@@ -36,7 +38,7 @@ namespace fft
                                      cudaGetErrorString(error_);
     };
 
-#define FFT_CUDA_CHECK(err)                                                    \
+#define GPUFFT_CUDA_CHECK(err)                                                 \
     do                                                                         \
     {                                                                          \
         cudaError_t error = err;                                               \
@@ -63,4 +65,5 @@ namespace fft
     __host__ void GPU_ACTIVITY_HOST(unsigned long long* output,
                                     unsigned long long fix_num);
 
-} // namespace fft
+} // namespace gpufft
+#endif // COMMON_FFT_H

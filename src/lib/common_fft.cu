@@ -5,7 +5,7 @@
 
 #include "common_fft.cuh"
 
-namespace fft
+namespace gpufft
 {
 
     void customAssert(bool condition, const std::string& errorMessage)
@@ -106,4 +106,4 @@ namespace fft
     {
         GPU_ACTIVITY<<<64, 512>>>(output, fix_num);
     }
-} // namespace fft
+} // namespace gpufft

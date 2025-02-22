@@ -8,7 +8,7 @@
 
 #include "complex.cuh"
 
-namespace fft
+namespace gpufft
 {
 
     int bitreverse(int index, int n_power);
@@ -60,5 +60,5 @@ namespace fft
         std::vector<COMPLEX<T>> InverseReverseRootTable();
     };
 
-} // namespace fft
+} // namespace gpufft
 #endif // CPU_FFT_H
