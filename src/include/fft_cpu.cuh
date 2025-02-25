@@ -1,4 +1,4 @@
-// Copyright 2024 Alişah Özcan
+// Copyright 2023-2025 Alişah Özcan
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 // Developer: Alişah Özcan
@@ -19,15 +19,14 @@ namespace gpufft
         X_N_minus
     }; // X_N_minus: X^n - 1, X_N_plus: X^n + 1
 
-    std::vector<unsigned long long>
-    schoolbook_poly_multiplication(std::vector<unsigned long long> a,
-                                   std::vector<unsigned long long> b,
-                                   unsigned long long modulus, int size);
+    template <typename T>
+    std::vector<T> schoolbook_poly_multiplication(std::vector<T> a,
+                                                  std::vector<T> b, T modulus,
+                                                  int size);
 
-    std::vector<unsigned long long>
-    schoolbook_poly_multiplication_without_reduction(
-        std::vector<unsigned long long> a, std::vector<unsigned long long> b,
-        unsigned long long modulus, int size);
+    template <typename T>
+    std::vector<T> schoolbook_poly_multiplication_without_reduction(
+        std::vector<T> a, std::vector<T> b, T modulus, int size);
 
     template <typename T> class FFT
     {

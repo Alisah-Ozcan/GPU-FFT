@@ -1,4 +1,4 @@
-// Copyright 2024 Alişah Özcan
+// Copyright 2023-2025 Alişah Özcan
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 // Developer: Alişah Özcan
@@ -20,53 +20,70 @@ namespace gpufft
         return res_1;
     }
 
-    std::vector<unsigned long long>
+    template <typename T>
+    std::vector<T> schoolbook_poly_multiplication(std::vector<T> a,
+                                                  std::vector<T> b, T modulus,
+                                                  int size)
+    {
+        std::vector<T> mult_vector(size * 2, 0);
+
+        for (int i = 0; i < size; i++)
+        {
+            for (int j = 0; j < size; j++)
+            {
+                T mult = a[i] * b[j];
+                mult_vector[i + j] += mult;
+            }
+        }
+
+        for (int i = 0; i < 2 * size; i++)
+        {
+            mult_vector[i] = mult_vector[i] % modulus;
+        }
+
+        return mult_vector;
+    }
+
+    template <typename T>
+    std::vector<T> schoolbook_poly_multiplication_without_reduction(
+        std::vector<T> a, std::vector<T> b, T modulus, int size)
+    {
+        std::vector<T> mult_vector(size * 2, 0);
+
+        for (int i = 0; i < size; i++)
+        {
+            for (int j = 0; j < size; j++)
+            {
+                T mult = a[i] * b[j];
+                mult_vector[i + j] += mult;
+            }
+        }
+
+        for (int i = 0; i < 2 * size; i++)
+        {
+            mult_vector[i] = mult_vector[i] % modulus;
+        }
+
+        return mult_vector;
+    }
+
+    template std::vector<int> schoolbook_poly_multiplication(std::vector<int> a,
+                                                             std::vector<int> b,
+                                                             int modulus,
+                                                             int size);
+
+    template std::vector<unsigned long long>
     schoolbook_poly_multiplication(std::vector<unsigned long long> a,
                                    std::vector<unsigned long long> b,
-                                   unsigned long long modulus, int size)
-    {
-        std::vector<unsigned long long> mult_vector(size * 2, 0);
+                                   unsigned long long modulus, int size);
 
-        for (int i = 0; i < size; i++)
-        {
-            for (int j = 0; j < size; j++)
-            {
-                unsigned long long mult = a[i] * b[j];
-                mult_vector[i + j] += mult;
-            }
-        }
+    template std::vector<int> schoolbook_poly_multiplication_without_reduction(
+        std::vector<int> a, std::vector<int> b, int modulus, int size);
 
-        for (int i = 0; i < 2 * size; i++)
-        {
-            mult_vector[i] = mult_vector[i] % modulus;
-        }
-
-        return mult_vector;
-    }
-
-    std::vector<unsigned long long>
+    template std::vector<unsigned long long>
     schoolbook_poly_multiplication_without_reduction(
         std::vector<unsigned long long> a, std::vector<unsigned long long> b,
-        unsigned long long modulus, int size)
-    {
-        std::vector<unsigned long long> mult_vector(size * 2, 0);
-
-        for (int i = 0; i < size; i++)
-        {
-            for (int j = 0; j < size; j++)
-            {
-                unsigned long long mult = a[i] * b[j];
-                mult_vector[i + j] += mult;
-            }
-        }
-
-        for (int i = 0; i < 2 * size; i++)
-        {
-            mult_vector[i] = mult_vector[i] % modulus;
-        }
-
-        return mult_vector;
-    }
+        unsigned long long modulus, int size);
 
     template <typename T> FFT<T>::FFT(int size)
     {

@@ -1,13 +1,26 @@
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_LOCATION})
+# Copyright 2023-2025 Alişah Özcan
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+# Developer: Alişah Özcan
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_LOCATION}/benchmarks)
 
 set(EXECUTABLES
     gpu_fft_mult_benchmark bench_gpu_fft_mult.cu
     gpu_fft_benchmark bench_gpu_fft.cu
 )
 
+include(FetchContent)
+FetchContent_Declare(
+    nvbench
+    GIT_REPOSITORY https://github.com/NVIDIA/nvbench.git
+    GIT_TAG main
+)
+FetchContent_MakeAvailable(nvbench)
+
 function(add_benchmark exe source)
     add_executable(${exe} ${source})
-    target_link_libraries(${exe} PRIVATE fft CUDA::cudart)
+    target_link_libraries(${exe} PRIVATE fft CUDA::cudart nvbench::main)
     set_target_properties(${exe} PROPERTIES
         CUDA_SEPARABLE_COMPILATION OFF
         POSITION_INDEPENDENT_CODE ON

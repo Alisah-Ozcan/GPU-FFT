@@ -1,9 +1,14 @@
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_LOCATION})
+# Copyright 2023-2025 Alişah Özcan
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+# Developer: Alişah Özcan
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_LOCATION}/examples)
 
 set(EXECUTABLES
-    cpu_fft_examples test_fft_cpu.cu
-    gpu_fft_C_C_examples test_fft_gpu_C_C.cu
-    gpu_fft_R_R_examples test_fft_gpu_R_R.cu
+    cpu_fft_example test_fft_cpu.cu
+    gpu_fft_C_C_example test_fft_gpu_C_C.cu
+    gpu_fft_R_R_example test_fft_gpu_R_R.cu
 )
 
 function(add_benchmark exe source)

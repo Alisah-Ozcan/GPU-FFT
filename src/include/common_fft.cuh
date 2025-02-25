@@ -1,4 +1,4 @@
-// Copyright 2024 Alişah Özcan
+// Copyright 2023-2025 Alişah Özcan
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 // Developer: Alişah Özcan
@@ -49,21 +49,6 @@ namespace gpufft
     } while (0)
 
     void customAssert(bool condition, const std::string& errorMessage);
-
-    float calculate_mean(const float array[], int size);
-
-    float calculate_standard_deviation(const float array[], int size);
-
-    float find_best_average(const float array[], int array_size,
-                            int num_elements);
-
-    float find_min_average(const float array[], int array_size,
-                           int num_elements);
-
-    __global__ void GPU_ACTIVITY(unsigned long long* output,
-                                 unsigned long long fix_num);
-    __host__ void GPU_ACTIVITY_HOST(unsigned long long* output,
-                                    unsigned long long fix_num);
 
 } // namespace gpufft
 #endif // COMMON_FFT_H

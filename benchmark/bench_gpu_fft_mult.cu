@@ -1,173 +1,88 @@
-// Copyright 2024 Alişah Özcan
+// Copyright 2023-2025 Alişah Özcan
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 // Developer: Alişah Özcan
 
-#include <cstdlib> // For atoi or atof functions
-#include <iomanip>
-#include <iostream>
-#include <random>
-
 #include "fft.cuh"
 #include "fft_cpu.cuh"
+#include "bench_util.cuh"
 
 using namespace std;
 using namespace gpufft;
 
-int q;
-int logn;
-int batch;
-int n;
+// typedef Float32 BenchmarkDataType; // Use for 32-bit benchmark
+typedef Float64 BenchmarkDataType; // Use for 64-bit benchmark
 
-int main(int argc, char* argv[])
+void GPU_FFT_Poly_Mult_Benchmark(nvbench::state& state)
 {
-    if (argc < 3)
-    {
-        q = 7;
-        logn = 11;
-        batch = 1;
-        n = 1 << logn;
-    }
-    else
-    {
-        q = 7;
-        logn = atoi(argv[1]);
-        batch = atoi(argv[2]);
-        n = 1 << logn;
+    const auto ring_size_logN = state.get_int64("Ring Size LogN");
+    const auto batch_count = state.get_int64("Batch Count");
+    const auto ring_size = 1 << ring_size_logN;
 
-        if ((logn < 12) || (24 < logn))
+    thrust::device_vector<COMPLEX<BenchmarkDataType>> inout_data(
+        2 * ring_size * (batch_count * 2));
+    thrust::transform(
+        thrust::counting_iterator<int>(0),
+        thrust::counting_iterator<int>(2 * ring_size * (batch_count * 2)),
+        inout_data.begin(), random_functor<COMPLEX<BenchmarkDataType>>(1234));
+
+    thrust::device_vector<COMPLEX<BenchmarkDataType>> root_table_data(
+        ring_size);
+    thrust::transform(thrust::counting_iterator<int>(0),
+                      thrust::counting_iterator<int>((ring_size)),
+                      root_table_data.begin(),
+                      random_functor<COMPLEX<BenchmarkDataType>>(1234));
+
+    state.add_global_memory_reads<BenchmarkDataType>(
+        (2 * ring_size * (batch_count * 2)) + (ring_size * (batch_count * 2)),
+        "Read Memory Size");
+    state.add_global_memory_writes<BenchmarkDataType>(ring_size * batch_count,
+                                                      "Write Memory Size");
+    state.collect_l1_hit_rates();
+    state.collect_l2_hit_rates();
+    // state.collect_loads_efficiency();
+    // state.collect_stores_efficiency();
+    // state.collect_dram_throughput();
+
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+    state.set_cuda_stream(nvbench::make_cuda_stream_view(stream));
+
+    COMPLEX<BenchmarkDataType> mod_inverse(1.0, 1.0);
+
+    fft_configuration<BenchmarkDataType> cfg_fft = {
+        .n_power = (static_cast<int>(ring_size_logN) + 1),
+        .fft_type = FORWARD,
+        .reduction_poly = ReductionPolynomial::X_N_minus,
+        .zero_padding = false,
+        .stream = stream};
+
+    fft_configuration<BenchmarkDataType> cfg_ifft = {
+        .n_power = (static_cast<int>(ring_size_logN) + 1),
+        .fft_type = INVERSE,
+        .reduction_poly = ReductionPolynomial::X_N_minus,
+        .zero_padding = false,
+        .mod_inverse = mod_inverse,
+        .stream = stream};
+
+    state.exec(
+        [&](nvbench::launch& launch)
         {
-            throw std::runtime_error("LOGN should be in range 12 to 24.");
-        }
-    }
+            GPU_FFT(thrust::raw_pointer_cast(inout_data.data()),
+                    thrust::raw_pointer_cast(root_table_data.data()), cfg_fft,
+                    static_cast<int>(batch_count) * 2, false);
 
-    const int test_count = 50;
-    const int bestof = 10;
-    float time_measurements[test_count];
-    for (int loop = 0; loop < test_count; loop++)
-    {
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        // std::mt19937 gen(0);
-        unsigned long long minNumber = 0;
-        unsigned long long maxNumber = q - 1;
-        std::uniform_int_distribution<int> dis(minNumber, maxNumber);
+            GPU_FFT(thrust::raw_pointer_cast(inout_data.data()),
+                    thrust::raw_pointer_cast(root_table_data.data()), cfg_ifft,
+                    static_cast<int>(batch_count), true);
+        });
 
-        std::vector<std::vector<Complex64>> vec_GPU(
-            2 * batch, std::vector<Complex64>(n * 2)); // A and B together
-
-        for (int j = 0; j < 2 * batch; j++)
-        { // LOAD A
-            for (int i = 0; i < n * 2; i++)
-            {
-                Complex64 element = dis(gen);
-                vec_GPU[j][i] = element;
-            }
-        }
-
-        FFT<Float64> fft_generator(n);
-
-        /////////////////////////////////////////////////////////////////////////
-
-        Complex64* Forward_InOut_Datas;
-
-        GPUFFT_CUDA_CHECK(
-            cudaMalloc(&Forward_InOut_Datas,
-                       2 * batch * n * 2 *
-                           sizeof(Complex64))); // 2 --> A and B, batch -->
-                                                // batch size, 2 --> zero pad
-
-        for (int j = 0; j < 2 * batch; j++)
-        {
-            GPUFFT_CUDA_CHECK(
-                cudaMemcpy(Forward_InOut_Datas + (n * 2 * j), vec_GPU[j].data(),
-                           n * 2 * sizeof(Complex64), cudaMemcpyHostToDevice));
-        }
-        /////////////////////////////////////////////////////////////////////////
-
-        Complex64* Root_Table_Device;
-
-        GPUFFT_CUDA_CHECK(
-            cudaMalloc(&Root_Table_Device, n * sizeof(Complex64)));
-
-        vector<Complex64> reverse_table = fft_generator.ReverseRootTable();
-        GPUFFT_CUDA_CHECK(cudaMemcpy(Root_Table_Device, reverse_table.data(),
-                                     n * sizeof(Complex64),
-                                     cudaMemcpyHostToDevice));
-
-        /////////////////////////////////////////////////////////////////////////
-
-        Complex64* Inverse_Root_Table_Device;
-
-        GPUFFT_CUDA_CHECK(
-            cudaMalloc(&Inverse_Root_Table_Device, n * sizeof(Complex64)));
-
-        vector<Complex64> inverse_reverse_table =
-            fft_generator.InverseReverseRootTable();
-        GPUFFT_CUDA_CHECK(
-            cudaMemcpy(Inverse_Root_Table_Device, inverse_reverse_table.data(),
-                       n * sizeof(Complex64), cudaMemcpyHostToDevice));
-
-        /////////////////////////////////////////////////////////////////////////
-
-        unsigned long long* activity_output;
-        GPUFFT_CUDA_CHECK(cudaMalloc(&activity_output,
-                                     64 * 512 * sizeof(unsigned long long)));
-        GPU_ACTIVITY_HOST(activity_output, 111111);
-        GPUFFT_CUDA_CHECK(cudaFree(activity_output));
-
-        ////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-        cudaDeviceSynchronize();
-
-        fft_configuration<Float64> cfg_fft = {
-            .n_power = (logn + 1),
-            .fft_type = FORWARD,
-            .reduction_poly = ReductionPolynomial::X_N_minus,
-            .zero_padding = false,
-            .stream = 0};
-        fft_configuration<Float64> cfg_ifft = {
-            .n_power = (logn + 1),
-            .fft_type = INVERSE,
-            .reduction_poly = ReductionPolynomial::X_N_minus,
-            .zero_padding = false,
-            .mod_inverse = Complex64(fft_generator.n_inverse, 0.0),
-            .stream = 0};
-
-        float time = 0;
-        cudaEvent_t startx, stopx;
-        cudaEventCreate(&startx);
-        cudaEventCreate(&stopx);
-
-        cudaEventRecord(startx);
-
-        GPU_FFT(Forward_InOut_Datas, Root_Table_Device, cfg_fft, batch * 2,
-                false);
-
-        GPU_FFT(Forward_InOut_Datas, Inverse_Root_Table_Device, cfg_ifft, batch,
-                true);
-
-        cudaEventRecord(stopx);
-        cudaEventSynchronize(stopx);
-        cudaEventElapsedTime(&time, startx, stopx);
-        // cout << loop << ": " << time << " milliseconds" << endl;
-        // cout << time << ", " ;
-
-        time_measurements[loop] = time;
-        GPUFFT_CUDA_CHECK(cudaFree(Forward_InOut_Datas));
-        GPUFFT_CUDA_CHECK(cudaFree(Root_Table_Device));
-        GPUFFT_CUDA_CHECK(cudaFree(Inverse_Root_Table_Device));
-    }
-
-    cout << endl
-         << endl
-         << "Average: " << calculate_mean(time_measurements, test_count)
-         << endl;
-    cout << "Best Average: "
-         << find_min_average(time_measurements, test_count, bestof) << endl;
-
-    cout << "Standart Deviation: "
-         << calculate_standard_deviation(time_measurements, test_count) << endl;
-
-    return EXIT_SUCCESS;
+    cudaStreamSynchronize(stream);
+    cudaStreamDestroy(stream);
 }
+
+NVBENCH_BENCH(GPU_FFT_Poly_Mult_Benchmark)
+    .add_int64_axis("Ring Size LogN",
+                    {12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23})
+    .add_int64_axis("Batch Count", {1})
+    .set_timeout(1);

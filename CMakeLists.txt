@@ -1,4 +1,9 @@
-cmake_minimum_required(VERSION 3.2)
+# Copyright 2023-2025 Alişah Özcan
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+# Developer: Alişah Özcan
+
+cmake_minimum_required(VERSION 3.26)
 project(GPUFFT VERSION 1.0 LANGUAGES C CXX CUDA ASM)
 
 set(BINARY_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/bin)

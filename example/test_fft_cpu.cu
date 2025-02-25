@@ -1,4 +1,4 @@
-// Copyright 2024 Alişah Özcan
+// Copyright 2023-2025 Alişah Özcan
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 // Developer: Alişah Özcan
@@ -18,6 +18,9 @@ int q;
 int logn;
 int batch;
 int n;
+
+// typedef Float32 TestDataType; // Use for 32-bit benchmark
+typedef Float64 TestDataType; // Use for 64-bit benchmark
 
 int main(int argc, char* argv[])
 {
@@ -43,14 +46,12 @@ int main(int argc, char* argv[])
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    unsigned long long minNumber = 0;
-    unsigned long long maxNumber = q - 1;
+    int minNumber = 0;
+    int maxNumber = q - 1;
     std::uniform_int_distribution<int> dis(minNumber, maxNumber);
 
-    vector<vector<unsigned long long>> A_poly(
-        batch, vector<unsigned long long>(n * 2));
-    vector<vector<unsigned long long>> B_poly(
-        batch, vector<unsigned long long>(n * 2));
+    vector<vector<int>> A_poly(batch, vector<int>(n * 2));
+    vector<vector<int>> B_poly(batch, vector<int>(n * 2));
 
     for (int j = 0; j < batch; j++)
     {
@@ -71,22 +72,23 @@ int main(int argc, char* argv[])
         }
     }
 
-    std::vector<std::vector<Complex64>> A_vec(batch,
-                                              std::vector<Complex64>(n * 2));
-    std::vector<std::vector<Complex64>> B_vec(batch,
-                                              std::vector<Complex64>(n * 2));
+    std::vector<std::vector<COMPLEX<TestDataType>>> A_vec(
+        batch, std::vector<COMPLEX<TestDataType>>(n * 2));
+    std::vector<std::vector<COMPLEX<TestDataType>>> B_vec(
+        batch, std::vector<COMPLEX<TestDataType>>(n * 2));
 
-    std::vector<std::vector<Complex64>> vec_GPU(
-        2 * batch, std::vector<Complex64>(n * 2)); // A and B together
+    std::vector<std::vector<COMPLEX<TestDataType>>> vec_GPU(
+        2 * batch,
+        std::vector<COMPLEX<TestDataType>>(n * 2)); // A and B together
 
     for (int j = 0; j < batch; j++)
     {
         for (int i = 0; i < n * 2; i++)
         {
-            Complex64 A_element = A_poly[j][i];
+            COMPLEX<TestDataType> A_element = A_poly[j][i];
             A_vec[j][i] = A_element;
 
-            Complex64 B_element = B_poly[j][i];
+            COMPLEX<TestDataType> B_element = B_poly[j][i];
             B_vec[j][i] = B_element;
         }
     }
@@ -95,7 +97,7 @@ int main(int argc, char* argv[])
     { // LOAD A
         for (int i = 0; i < n * 2; i++)
         {
-            Complex64 element = A_poly[j][i];
+            COMPLEX<TestDataType> element = A_poly[j][i];
             vec_GPU[j][i] = element;
         }
     }
@@ -104,12 +106,12 @@ int main(int argc, char* argv[])
     { // LOAD B
         for (int i = 0; i < n * 2; i++)
         {
-            Complex64 element = B_poly[j][i];
+            COMPLEX<TestDataType> element = B_poly[j][i];
             vec_GPU[j + batch][i] = element;
         }
     }
 
-    FFT<Float64> fft_generator(n);
+    FFT<TestDataType> fft_generator(n);
 
     for (int j = 0; j < batch; j++)
     {
@@ -132,7 +134,7 @@ int main(int argc, char* argv[])
 
     for (int j = 0; j < batch; j++)
     {
-        vector<unsigned long long> test_school =
+        vector<int> test_school =
             schoolbook_poly_multiplication_without_reduction(A_poly[j],
                                                              B_poly[j], q, n);
         for (int i = 0; i < n * 2; i++)

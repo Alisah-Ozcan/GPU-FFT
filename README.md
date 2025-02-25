@@ -34,15 +34,19 @@ $ sudo cmake --install build
 
 #### CPU & GPU FTT Testing & Benchmarking
 
+Choose one of data type which is upper line of the benchmark files:
+- typedef Float32 BenchmarkDataType;
+- typedef Float64 BenchmarkDataType;
+
 To run examples:
 
 ```bash
 $ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D GPUFFT_BUILD_EXAMPLES=ON -B./build
 $ cmake --build ./build/ --parallel
 
-$ ./build/bin/cpu_fft_examples        <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-$ ./build/bin/gpu_fft_examples        <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-$ Example: ./build/bin/gpu_fft_examples 12 1
+$ ./build/bin/examples/cpu_fft_example  <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+$ ./build/bin/examples/gpu_fft_example  <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+$ Example: ./build/bin/examples/gpu_fft_example 12 1
 ```
 
 To run benchmarks:
@@ -51,9 +55,8 @@ To run benchmarks:
 $ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D GPUFFT_BUILD_BENCHMARKS=ON -B./build
 $ cmake --build ./build/ --parallel
 
-$ ./build/bin/gpu_fft_mult_benchmark  <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-$ ./build/bin/gpu_fft_benchmark       <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-$ Example: ./build/bin/gpu_fft_examples 12 1
+$ ./build/bin/benchmark/gpu_fft_mult_benchmark --disable-blocking-kernel
+$ ./build/bin/benchmark/gpu_fft_benchmark --disable-blocking-kernel
 ```
 
 ## Using GPU-FFT in a downstream CMake project

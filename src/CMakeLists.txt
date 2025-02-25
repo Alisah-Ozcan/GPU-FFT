@@ -1,3 +1,8 @@
+# Copyright 2023-2025 Alişah Özcan
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+# Developer: Alişah Özcan
+
 file(GLOB_RECURSE LIB_SOURCE_FILES
     RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     CONFIGURE_DEPENDS
