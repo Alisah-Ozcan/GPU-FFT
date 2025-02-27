@@ -6,8 +6,10 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_LOCATION}/benchmarks)
 
 set(EXECUTABLES
-    gpu_fft_mult_benchmark bench_gpu_fft_mult.cu
     gpu_fft_benchmark bench_gpu_fft.cu
+    gpu_fft_C_C_mult_benchmark bench_gpu_fft_C_C_mult.cu
+    gpu_fft_R_R_mult_benchmark bench_gpu_fft_R_R_mult.cu
+    gpu_ffnt_R_R_mult_benchmark bench_gpu_ffnt_R_R_mult.cu
 )
 
 include(FetchContent)

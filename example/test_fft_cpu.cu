@@ -143,7 +143,7 @@ int main(int argc, char* argv[])
 
             if (test_school[i] != (cpu_result % q))
             {
-                throw("ERROR");
+                throw runtime_error("ERROR");
             }
 
             if (i < 10)

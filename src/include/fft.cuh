@@ -181,6 +181,85 @@ namespace gpufft
     __host__ void GPU_Special_FFT(COMPLEX<T>* device_inout,
                                   COMPLEX<T>* root_of_unity_table,
                                   fft_configuration<T> cfg, int batch_size);
+                                  
+    //      ---- FFNT ----
+    /**
+     * Efficient Negacyclic Convolution over R
+     * Paper: https://eprint.iacr.org/2021/480
+     *
+     * Input:
+     *   - f, g ∈ R^N for some even integer N.
+     *
+     * Precomputation:
+     *   - Compute ω = exp(2πi / N) for j = -N/2 + 1, …, N/2 - 1.
+     *
+     * Output:
+     *   - h ∈ R^N, where h is the negacyclic convolution of f and g (i.e., h =
+     * f * g).
+     *
+     * Steps:
+     *
+     * 1. For j = 0 to (N/2 - 1):
+     *      - Compute f'_j = f_j + i * f_(j + N/2)   // fold
+     *      - Compute g'_j = g_j + i * g_(j + N/2)   // fold
+     *
+     * 2. For j = N/2 to (N - 1):
+     *      - Compute f'_j = f_(j - N/2) - i * f_j
+     *      - Compute g'_j = g_(j - N/2) - i * g_j
+     *
+     * 3. Compute F = F_(N/2)(f')     // Forward FFT of f' of size N/2
+     *
+     * 4. Compute G = F_(N/2)(g')     // Forward FFT of g' of size N/2
+     *
+     * 5. Compute H = F * G           // Pointwise multiplication
+     *
+     * 6. Compute h' = F_(N/2)^(-1)(H) // Inverse FFT of H of size N/2
+     *
+     * 7. For j = 0 to (N/2 - 1):
+     *      - Set h'_j       = Re(h'_j)
+     *      - Set h'_(j+N/2) = Im(h'_j)
+     *
+     * 8. Unfold the result to obtain h:
+     *      - h_j       = Re(S(h'_j))
+     *      - h_(j+N/2) = S(h'_(j+N/2))
+     *
+     * 9. Return h.
+     */
+
+    template <typename T>
+    __global__ void
+    ForwardFFNTCoreUnique(T* polynomial_in, COMPLEX<T>* polynomial_out,
+                          COMPLEX<T>* twist_table,
+                          COMPLEX<T>* root_of_unity_table, int shared_index,
+                          int logm, int outer_iteration_count, int N_power);
+
+    template <typename T>
+    __global__ void
+    ForwardFFNTCoreRegular(COMPLEX<T>* polynomial,
+                           COMPLEX<T>* root_of_unity_table, int shared_index,
+                           int logm, int outer_iteration_count, int N_power,
+                           bool zero_padding, bool not_last_kernel);
+
+    template <typename T>
+    __global__ void InverseFFNTCoreRegular(
+        COMPLEX<T>* polynomial, COMPLEX<T>* inverse_root_of_unity_table,
+        int shared_index, int logm, int k, int outer_iteration_count,
+        int N_power, bool NTT_mult, int offset2);
+
+    template <typename T>
+    __global__ void InverseFFNTCoreUnique(
+        COMPLEX<T>* polynomial_in, T* polynomial_out, COMPLEX<T>* untwist_table,
+        COMPLEX<T>* inverse_root_of_unity_table, int shared_index, int logm,
+        int k, int outer_iteration_count, int N_power, COMPLEX<T> n_inverse);
+
+    template <typename T>
+    __host__ void
+    GPU_FFNT(T* device_inout, COMPLEX<T>* device_temp, COMPLEX<T>* twist_table,
+             COMPLEX<T>* root_of_unity_table, fft_configuration<T> cfg,
+             int batch_size, bool multiplication);
+
+    ///////////////////////////////////////////////////
+    ///////////////////////////////////////////////////
 
     // FFT Kernel Parameters
     template <typename T> auto CreateForwardFFTKernel()
@@ -404,6 +483,110 @@ namespace gpufft
               {128, 256, 4, 64, 512 * sizeof(COMPLEX<T>), 8, 8, 0, 7, true},
               {1, 32768, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 15, 0, 9,
                false}}}};
+    }
+
+    // FFNT Kernel Parameters
+    template <typename T> auto CreateForwardFFNTKernel()
+    {
+        return std::unordered_map<int, std::vector<KernelConfig>>{
+            {12,
+             {{4, 1, 128, 2, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 2, false},
+              {1, 4, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 2, 0, 9, true}}},
+            {13,
+             {{8, 1, 64, 4, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 3, true},
+              {1, 8, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 3, 0, 9, false}}},
+            {14,
+             {{16, 1, 32, 8, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 4, true},
+              {1, 16, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 4, 0, 9, false}}},
+            {15,
+             {{32, 1, 16, 16, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 5, true},
+              {1, 32, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 5, 0, 9, false}}},
+            {16,
+             {{64, 1, 8, 32, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 6, true},
+              {1, 64, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 6, 0, 9, false}}},
+            {17,
+             {{128, 1, 4, 64, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 7, true},
+              {1, 128, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 7, 0, 9, false}}},
+            {18,
+             {{256, 1, 32, 8, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 4, true},
+              {16, 16, 32, 8, 512 * sizeof(COMPLEX<T>), 8, 4, 0, 4, true},
+              {1, 256, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 8, 0, 9, false}}},
+            {19,
+             {{512, 1, 32, 8, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 4, true},
+              {32, 16, 16, 16, 512 * sizeof(COMPLEX<T>), 8, 4, 0, 5, true},
+              {1, 512, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 9, 0, 9, false}}},
+            {20,
+             {{1024, 1, 16, 16, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 5, true},
+              {32, 32, 16, 16, 512 * sizeof(COMPLEX<T>), 8, 5, 0, 5, true},
+              {1, 1024, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 10, 0, 9, false}}},
+            {21,
+             {{2048, 1, 16, 16, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 5, true},
+              {64, 32, 8, 32, 512 * sizeof(COMPLEX<T>), 8, 5, 0, 6, true},
+              {1, 2048, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 11, 0, 9, false}}},
+            {22,
+             {{4096, 1, 8, 32, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 6, true},
+              {64, 64, 8, 32, 512 * sizeof(COMPLEX<T>), 8, 6, 0, 6, true},
+              {1, 4096, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 12, 0, 9, false}}},
+            {23,
+             {{8192, 1, 8, 32, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 6, true},
+              {128, 64, 4, 64, 512 * sizeof(COMPLEX<T>), 8, 6, 0, 7, true},
+              {1, 8192, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 13, 0, 9, false}}},
+            {24,
+             {{16384, 1, 4, 64, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 7, true},
+              {128, 128, 4, 64, 512 * sizeof(COMPLEX<T>), 8, 7, 0, 7, true},
+              {1, 16384, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 14, 0, 9,
+               false}}}};
+    }
+
+    template <typename T> auto CreateInverseFFNTKernel()
+    {
+        return std::unordered_map<int, std::vector<KernelConfig>>{
+            {12,
+             {{1, 4, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 10, 2, 9, false},
+              {4, 1, 128, 2, 512 * sizeof(COMPLEX<T>), 8, 1, 0, 2, true}}},
+            {13,
+             {{1, 8, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 11, 3, 9, false},
+              {8, 1, 64, 4, 512 * sizeof(COMPLEX<T>), 8, 2, 0, 3, true}}},
+            {14,
+             {{1, 16, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 12, 4, 9, false},
+              {16, 1, 32, 8, 512 * sizeof(COMPLEX<T>), 8, 3, 0, 4, true}}},
+            {15,
+             {{1, 32, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 13, 5, 9, false},
+              {32, 1, 16, 16, 512 * sizeof(COMPLEX<T>), 8, 4, 0, 5, true}}},
+            {16,
+             {{1, 64, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 14, 6, 9, false},
+              {64, 1, 8, 32, 512 * sizeof(COMPLEX<T>), 8, 5, 0, 6, true}}},
+            {17,
+             {{1, 128, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 15, 7, 9, false},
+              {128, 1, 4, 64, 512 * sizeof(COMPLEX<T>), 8, 6, 0, 7, true}}},
+            {18,
+             {{1, 256, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 16, 8, 9, false},
+              {16, 16, 32, 8, 512 * sizeof(COMPLEX<T>), 8, 7, 4, 4, false},
+              {256, 1, 32, 8, 512 * sizeof(COMPLEX<T>), 8, 3, 0, 4, true}}},
+            {19,
+             {{1, 512, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 17, 9, 9, false},
+              {32, 16, 16, 16, 512 * sizeof(COMPLEX<T>), 8, 8, 4, 5, false},
+              {512, 1, 32, 8, 512 * sizeof(COMPLEX<T>), 8, 3, 0, 4, true}}},
+            {20,
+             {{1, 1024, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 18, 10, 9, false},
+              {32, 32, 16, 16, 512 * sizeof(COMPLEX<T>), 8, 9, 5, 5, false},
+              {1024, 1, 16, 16, 512 * sizeof(COMPLEX<T>), 8, 4, 0, 5, true}}},
+            {21,
+             {{1, 2048, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 19, 11, 9, false},
+              {64, 32, 8, 32, 512 * sizeof(COMPLEX<T>), 8, 10, 5, 6, false},
+              {2048, 1, 16, 16, 512 * sizeof(COMPLEX<T>), 8, 4, 0, 5, true}}},
+            {22,
+             {{1, 4096, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 20, 12, 9, false},
+              {64, 64, 8, 32, 512 * sizeof(COMPLEX<T>), 8, 11, 6, 6, false},
+              {4096, 1, 8, 32, 512 * sizeof(COMPLEX<T>), 8, 5, 0, 6, true}}},
+            {23,
+             {{1, 8192, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 21, 13, 9, false},
+              {128, 64, 4, 64, 512 * sizeof(COMPLEX<T>), 8, 12, 6, 7, false},
+              {8192, 1, 8, 32, 512 * sizeof(COMPLEX<T>), 8, 5, 0, 6, true}}},
+            {24,
+             {{1, 16384, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 22, 14, 9, false},
+              {128, 128, 4, 64, 512 * sizeof(COMPLEX<T>), 8, 13, 7, 7, false},
+              {16384, 1, 4, 64, 512 * sizeof(COMPLEX<T>), 8, 6, 0, 7, true}}}};
     }
 
 } // namespace gpufft

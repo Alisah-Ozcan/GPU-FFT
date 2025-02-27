@@ -72,33 +72,14 @@ int main(int argc, char* argv[])
         }
     }
 
-    std::vector<std::vector<COMPLEX<TestDataType>>> A_vec(
-        batch, std::vector<COMPLEX<TestDataType>>(n * 2));
-    std::vector<std::vector<COMPLEX<TestDataType>>> B_vec(
-        batch, std::vector<COMPLEX<TestDataType>>(n * 2));
-
-    std::vector<std::vector<COMPLEX<TestDataType>>> vec_GPU(
-        2 * batch,
-        std::vector<COMPLEX<TestDataType>>(n * 2)); // A and B together
-
-    for (int j = 0; j < batch; j++)
-    {
-        for (int i = 0; i < n * 2; i++)
-        {
-            COMPLEX<TestDataType> A_element = A_poly[j][i];
-            A_vec[j][i] = A_element;
-
-            COMPLEX<TestDataType> B_element = B_poly[j][i];
-            B_vec[j][i] = B_element;
-        }
-    }
+    std::vector<std::vector<TestDataType>> vec_GPU(
+        2 * batch, std::vector<TestDataType>(n * 2)); // A and B together
 
     for (int j = 0; j < batch; j++)
     { // LOAD A
         for (int i = 0; i < n * 2; i++)
         {
-            COMPLEX<TestDataType> element = A_poly[j][i];
-            vec_GPU[j][i] = element;
+            vec_GPU[j][i] = static_cast<TestDataType>(A_poly[j][i]);
         }
     }
 
@@ -106,8 +87,7 @@ int main(int argc, char* argv[])
     { // LOAD B
         for (int i = 0; i < n * 2; i++)
         {
-            COMPLEX<TestDataType> element = B_poly[j][i];
-            vec_GPU[j + batch][i] = element;
+            vec_GPU[j + batch][i] = static_cast<TestDataType>(B_poly[j][i]);
         }
     }
 
@@ -115,19 +95,25 @@ int main(int argc, char* argv[])
 
     /////////////////////////////////////////////////////////////////////////
 
-    COMPLEX<TestDataType>* Forward_InOut_Datas;
-
+    COMPLEX<TestDataType>* Temp_Datas;
     GPUFFT_CUDA_CHECK(cudaMalloc(
-        &Forward_InOut_Datas,
+        &Temp_Datas,
         2 * batch * n * 2 *
             sizeof(COMPLEX<TestDataType>))); // 2 --> A and B, batch -->
                                              // batch size, 2 --> zero pad
 
+    TestDataType* InOut_Datas;
+    GPUFFT_CUDA_CHECK(
+        cudaMalloc(&InOut_Datas,
+                   2 * batch * n * 2 *
+                       sizeof(TestDataType))); // 2 --> A and B, batch -->
+                                               // batch size, 2 --> zero pad
+
     for (int j = 0; j < 2 * batch; j++)
     {
-        GPUFFT_CUDA_CHECK(cudaMemcpy(
-            Forward_InOut_Datas + (n * 2 * j), vec_GPU[j].data(),
-            n * 2 * sizeof(COMPLEX<TestDataType>), cudaMemcpyHostToDevice));
+        GPUFFT_CUDA_CHECK(
+            cudaMemcpy(InOut_Datas + (n * 2 * j), vec_GPU[j].data(),
+                       n * 2 * sizeof(TestDataType), cudaMemcpyHostToDevice));
     }
     /////////////////////////////////////////////////////////////////////////
 
@@ -163,7 +149,8 @@ int main(int argc, char* argv[])
         .reduction_poly = ReductionPolynomial::X_N_minus,
         .zero_padding = false,
         .stream = 0};
-    GPU_FFT(Forward_InOut_Datas, Root_Table_Device, cfg_fft, batch * 2, false);
+    GPU_FFT(InOut_Datas, Temp_Datas, Root_Table_Device, cfg_fft, batch * 2,
+            false);
 
     fft_configuration<TestDataType> cfg_ifft = {
         .n_power = (logn + 1),
@@ -172,21 +159,22 @@ int main(int argc, char* argv[])
         .zero_padding = false,
         .mod_inverse = COMPLEX<TestDataType>(fft_generator.n_inverse, 0.0),
         .stream = 0};
-    GPU_FFT(Forward_InOut_Datas, Inverse_Root_Table_Device, cfg_ifft, batch,
+
+    GPU_FFT(InOut_Datas, Temp_Datas, Inverse_Root_Table_Device, cfg_ifft, batch,
             true);
 
-    COMPLEX<TestDataType> test[batch * 2 * n];
-    GPUFFT_CUDA_CHECK(cudaMemcpy(test, Forward_InOut_Datas,
-                                 batch * n * 2 * sizeof(COMPLEX<TestDataType>),
+    TestDataType test[batch * 2 * n];
+    GPUFFT_CUDA_CHECK(cudaMemcpy(test, InOut_Datas,
+                                 batch * n * 2 * sizeof(TestDataType),
                                  cudaMemcpyDeviceToHost));
 
     for (int j = 0; j < batch; j++)
     {
         vector<int> test_school =
-            schoolbook_poly_multiplication_without_reduction(A_poly[j], B_poly[j], q, n);
+            schoolbook_poly_multiplication(A_poly[j], B_poly[j], q, n);
         for (int i = 0; i < n * 2; i++)
         {
-            signed gpu_result = std::round(test[(j * (n * 2)) + i].real());
+            signed gpu_result = std::round(test[(j * (n * 2)) + i]);
             if (test_school[i] != (gpu_result % q))
             {
                 throw runtime_error("ERROR");

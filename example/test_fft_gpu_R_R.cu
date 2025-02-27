@@ -171,10 +171,10 @@ int main(int argc, char* argv[])
     for (int j = 0; j < batch; j++)
     {
         vector<int> test_school =
-            schoolbook_poly_multiplication(A_poly[j], B_poly[j], q, n);
+            schoolbook_poly_multiplication_without_reduction(A_poly[j], B_poly[j], q, n);
         for (int i = 0; i < n * 2; i++)
-        {
-            signed gpu_result = std::round(test[(j * (n * 2)) + i]);
+        {   
+            signed gpu_result = std::round(test[(j * (n * 2)) + i]);            
             if (test_school[i] != (gpu_result % q))
             {
                 throw runtime_error("ERROR");

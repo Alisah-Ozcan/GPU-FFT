@@ -9,6 +9,8 @@ set(EXECUTABLES
     cpu_fft_example test_fft_cpu.cu
     gpu_fft_C_C_example test_fft_gpu_C_C.cu
     gpu_fft_R_R_example test_fft_gpu_R_R.cu
+    cpu_ffnt_example test_ffnt_cpu.cu
+    gpu_ffnt_R_R_example test_ffnt_gpu_R_R.cu
 )
 
 function(add_benchmark exe source)

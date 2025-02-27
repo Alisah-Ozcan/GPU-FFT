@@ -59,5 +59,50 @@ namespace gpufft
         std::vector<COMPLEX<T>> InverseReverseRootTable();
     };
 
+    ////////////////////////////////////////////////
+    ////////////////////////////////////////////////
+
+    template <typename T> class FFNT
+    {
+      public:
+        int n;
+        int logn;
+        COMPLEX<T> x;
+        int max_size;
+
+        COMPLEX<T> root; // it was float
+        std::vector<COMPLEX<T>> root_tables_new;
+        std::vector<COMPLEX<T>> inverse_root_tables_new;
+
+        std::vector<COMPLEX<T>> root_tables_twist;
+        std::vector<COMPLEX<T>> inverse_root_tables_twist;
+
+        T n_inverse;
+
+        FFNT(int size);
+
+      private:
+        void GenerateRootTable();
+
+        void GenerateInverseRootTable();
+
+        void GenerateRootTableTwist();
+
+        void GenerateInverseRootTableTwist();
+
+      public:
+        std::vector<unsigned long long>
+        MULT(std::vector<unsigned long long>& input1,
+             std::vector<unsigned long long>& input2);
+
+        std::vector<COMPLEX<T>> ReverseRootTable_ffnt();
+
+        std::vector<COMPLEX<T>> InverseReverseRootTable_ffnt();
+
+        std::vector<COMPLEX<T>> twist_table_ffnt();
+
+        std::vector<COMPLEX<T>> untwist_table_ffnt();
+    };
+
 } // namespace gpufft
 #endif // CPU_FFT_H

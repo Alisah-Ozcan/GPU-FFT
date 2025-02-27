@@ -33,11 +33,6 @@ void GPU_FFT_Poly_Mult_Benchmark(nvbench::state& state)
                       root_table_data.begin(),
                       random_functor<COMPLEX<BenchmarkDataType>>(1234));
 
-    state.add_global_memory_reads<BenchmarkDataType>(
-        (2 * ring_size * (batch_count * 2)) + (ring_size * (batch_count * 2)),
-        "Read Memory Size");
-    state.add_global_memory_writes<BenchmarkDataType>(ring_size * batch_count,
-                                                      "Write Memory Size");
     state.collect_l1_hit_rates();
     state.collect_l2_hit_rates();
     // state.collect_loads_efficiency();
