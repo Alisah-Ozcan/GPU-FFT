@@ -19,28 +19,6 @@ void GPU_FFT_Poly_Mult_Benchmark(nvbench::state& state)
     const auto batch_count = state.get_int64("Batch Count");
     const auto ring_size = 1 << ring_size_logN;
 
-    /*
-
-    /
-
-    /////////////////////////////////////////////////////////////////////////
-
-    fft_configuration<TestDataType> cfg_fft = {.n_power = logn, .fft_type =
-    FORWARD, .zero_padding = false, .stream = 0}; GPU_FFNT(Forward_InOut_Datas,
-    Temp_Datas, Twist_Table_Device, Root_Table_Device, cfg_fft, batch * 2,
-    false);
-
-    TestDataType n_inverse_new = 1.0 / (n>>1);
-    fft_configuration<TestDataType> cfg_ifft = {.n_power = logn,
-                                  .fft_type = INVERSE,
-                                  .zero_padding = false,
-                                  .mod_inverse =
-    COMPLEX<TestDataType>(n_inverse_new, 0.0), .stream = 0};
-    GPU_FFNT(Forward_InOut_Datas, Temp_Datas, Untwist_Table_Device,
-    Inverse_Root_Table_Device, cfg_ifft, batch, true);
-
-    */
-
     thrust::device_vector<BenchmarkDataType> inout_data(ring_size *
                                                         (batch_count * 2));
     thrust::transform(
@@ -81,20 +59,20 @@ void GPU_FFT_Poly_Mult_Benchmark(nvbench::state& state)
 
     COMPLEX<BenchmarkDataType> mod_inverse(1.0, 1.0);
 
-    fft_configuration<BenchmarkDataType> cfg_fft = {
-        .n_power = (static_cast<int>(ring_size_logN)),
-        .fft_type = FORWARD,
-        .reduction_poly = ReductionPolynomial::X_N_minus,
-        .zero_padding = false,
-        .stream = stream};
+    fft_configuration<BenchmarkDataType> cfg_fft{};
+    cfg_fft.n_power = static_cast<int>(ring_size_logN);
+    cfg_fft.fft_type = FORWARD;
+    cfg_fft.reduction_poly = ReductionPolynomial::X_N_minus;
+    cfg_fft.zero_padding = false;
+    cfg_fft.stream = stream;
 
-    fft_configuration<BenchmarkDataType> cfg_ifft = {
-        .n_power = (static_cast<int>(ring_size_logN)),
-        .fft_type = INVERSE,
-        .reduction_poly = ReductionPolynomial::X_N_minus,
-        .zero_padding = false,
-        .mod_inverse = mod_inverse,
-        .stream = stream};
+    fft_configuration<BenchmarkDataType> cfg_ifft{};
+    cfg_ifft.n_power = static_cast<int>(ring_size_logN);
+    cfg_ifft.fft_type = INVERSE;
+    cfg_ifft.reduction_poly = ReductionPolynomial::X_N_minus;
+    cfg_ifft.zero_padding = false;
+    cfg_ifft.mod_inverse = mod_inverse;
+    cfg_ifft.stream = stream;
 
     state.exec(
         [&](nvbench::launch& launch)

@@ -52,20 +52,20 @@ void GPU_FFT_Poly_Mult_Benchmark(nvbench::state& state)
 
     COMPLEX<BenchmarkDataType> mod_inverse(1.0, 1.0);
 
-    fft_configuration<BenchmarkDataType> cfg_fft = {
-        .n_power = (static_cast<int>(ring_size_logN) + 1),
-        .fft_type = FORWARD,
-        .reduction_poly = ReductionPolynomial::X_N_minus,
-        .zero_padding = false,
-        .stream = stream};
+    fft_configuration<BenchmarkDataType> cfg_fft{};
+    cfg_fft.n_power = (static_cast<int>(ring_size_logN) + 1);
+    cfg_fft.fft_type = FORWARD;
+    cfg_fft.reduction_poly = ReductionPolynomial::X_N_minus;
+    cfg_fft.zero_padding = false;
+    cfg_fft.stream = stream;
 
-    fft_configuration<BenchmarkDataType> cfg_ifft = {
-        .n_power = (static_cast<int>(ring_size_logN) + 1),
-        .fft_type = INVERSE,
-        .reduction_poly = ReductionPolynomial::X_N_minus,
-        .zero_padding = false,
-        .mod_inverse = mod_inverse,
-        .stream = stream};
+    fft_configuration<BenchmarkDataType> cfg_ifft{};
+    cfg_ifft.n_power = (static_cast<int>(ring_size_logN) + 1);
+    cfg_ifft.fft_type = INVERSE;
+    cfg_ifft.reduction_poly = ReductionPolynomial::X_N_minus;
+    cfg_ifft.zero_padding = false;
+    cfg_ifft.mod_inverse = mod_inverse;
+    cfg_ifft.stream = stream;
 
     state.exec(
         [&](nvbench::launch& launch)

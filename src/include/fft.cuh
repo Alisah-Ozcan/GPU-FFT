@@ -181,7 +181,7 @@ namespace gpufft
     __host__ void GPU_Special_FFT(COMPLEX<T>* device_inout,
                                   COMPLEX<T>* root_of_unity_table,
                                   fft_configuration<T> cfg, int batch_size);
-                                  
+
     //      ---- FFNT ----
     /**
      * Efficient Negacyclic Convolution over R

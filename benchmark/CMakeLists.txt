@@ -16,7 +16,8 @@ include(FetchContent)
 FetchContent_Declare(
     nvbench
     GIT_REPOSITORY https://github.com/NVIDIA/nvbench.git
-    GIT_TAG main
+    GIT_TAG        2d9eafc7654c1d00ab7a14d5e5bd659f6fea0c69
+    GIT_SHALLOW    OFF          
 )
 FetchContent_MakeAvailable(nvbench)
 

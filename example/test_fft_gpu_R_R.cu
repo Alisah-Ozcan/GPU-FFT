@@ -143,22 +143,23 @@ int main(int argc, char* argv[])
 
     /////////////////////////////////////////////////////////////////////////
 
-    fft_configuration<TestDataType> cfg_fft = {
-        .n_power = (logn + 1),
-        .fft_type = FORWARD,
-        .reduction_poly = ReductionPolynomial::X_N_minus,
-        .zero_padding = false,
-        .stream = 0};
+    fft_configuration<TestDataType> cfg_fft{};
+    cfg_fft.n_power = (logn + 1);
+    cfg_fft.fft_type = FORWARD;
+    cfg_fft.reduction_poly = ReductionPolynomial::X_N_minus;
+    cfg_fft.zero_padding = false;
+    cfg_fft.stream = 0;
+
     GPU_FFT(InOut_Datas, Temp_Datas, Root_Table_Device, cfg_fft, batch * 2,
             false);
 
-    fft_configuration<TestDataType> cfg_ifft = {
-        .n_power = (logn + 1),
-        .fft_type = INVERSE,
-        .reduction_poly = ReductionPolynomial::X_N_minus,
-        .zero_padding = false,
-        .mod_inverse = COMPLEX<TestDataType>(fft_generator.n_inverse, 0.0),
-        .stream = 0};
+    fft_configuration<TestDataType> cfg_ifft{};
+    cfg_ifft.n_power = (logn + 1);
+    cfg_ifft.fft_type = INVERSE;
+    cfg_ifft.reduction_poly = ReductionPolynomial::X_N_minus;
+    cfg_ifft.zero_padding = false;
+    cfg_ifft.mod_inverse = COMPLEX<TestDataType>(fft_generator.n_inverse, 0.0);
+    cfg_ifft.stream = 0;
 
     GPU_FFT(InOut_Datas, Temp_Datas, Inverse_Root_Table_Device, cfg_ifft, batch,
             true);
@@ -171,10 +172,11 @@ int main(int argc, char* argv[])
     for (int j = 0; j < batch; j++)
     {
         vector<int> test_school =
-            schoolbook_poly_multiplication_without_reduction(A_poly[j], B_poly[j], q, n);
+            schoolbook_poly_multiplication_without_reduction(A_poly[j],
+                                                             B_poly[j], q, n);
         for (int i = 0; i < n * 2; i++)
-        {   
-            signed gpu_result = std::round(test[(j * (n * 2)) + i]);            
+        {
+            signed gpu_result = std::round(test[(j * (n * 2)) + i]);
             if (test_school[i] != (gpu_result % q))
             {
                 throw runtime_error("ERROR");
