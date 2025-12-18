@@ -9,28 +9,6 @@
 namespace gpufft
 {
     template <typename T>
-    __device__ void CooleyTukeyUnit(COMPLEX<T>& U, COMPLEX<T>& V,
-                                    COMPLEX<T>& root)
-    {
-        COMPLEX<T> u_ = U;
-        COMPLEX<T> v_ = V * root;
-
-        U = u_ + v_;
-        V = u_ - v_;
-    }
-
-    template <typename T>
-    __device__ void GentlemanSandeUnit(COMPLEX<T>& U, COMPLEX<T>& V,
-                                       COMPLEX<T>& root)
-    {
-        COMPLEX<T> u_ = U;
-        COMPLEX<T> v_ = V;
-
-        U = (u_ + v_);
-        V = (u_ - v_) * root;
-    }
-
-    template <typename T>
     __global__ void
     ForwardCore(COMPLEX<T>* polynomial, COMPLEX<T>* root_of_unity_table,
                 int shared_index, int logm, int outer_iteration_count,
@@ -1539,16 +1517,6 @@ namespace gpufft
     /////////////////////////////////////////////
     /////////////////////////////////////////////
     /////////////////////////////////////////////
-
-    template __device__ void CooleyTukeyUnit(Complex32& U, Complex32& V,
-                                             Complex32& root);
-    template __device__ void CooleyTukeyUnit(Complex64& U, Complex64& V,
-                                             Complex64& root);
-
-    template __device__ void GentlemanSandeUnit(Complex32& U, Complex32& V,
-                                                Complex32& root);
-    template __device__ void GentlemanSandeUnit(Complex64& U, Complex64& V,
-                                                Complex64& root);
 
     template __global__ void
     ForwardCore(Complex32* polynomial, Complex32* root_of_unity_table,

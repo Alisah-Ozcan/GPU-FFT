@@ -67,12 +67,26 @@ namespace gpufft
     };
 
     template <typename T>
-    __device__ void CooleyTukeyUnit(COMPLEX<T>& U, COMPLEX<T>& V,
-                                    COMPLEX<T>& root);
+    __device__ __forceinline__ void CooleyTukeyUnit(COMPLEX<T>& U, COMPLEX<T>& V,
+                                    COMPLEX<T>& root)
+    {
+        COMPLEX<T> u_ = U;
+        COMPLEX<T> v_ = V * root;
+
+        U = u_ + v_;
+        V = u_ - v_;
+    }
 
     template <typename T>
-    __device__ void GentlemanSandeUnit(COMPLEX<T>& U, COMPLEX<T>& V,
-                                       COMPLEX<T>& root);
+    __device__ __forceinline__ void GentlemanSandeUnit(COMPLEX<T>& U, COMPLEX<T>& V,
+                                       COMPLEX<T>& root)
+    {
+        COMPLEX<T> u_ = U;
+        COMPLEX<T> v_ = V;
+
+        U = (u_ + v_);
+        V = (u_ - v_) * root;
+    }
 
     template <typename T>
     __global__ void
