@@ -44,9 +44,12 @@ To run examples:
 $ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D GPUFFT_BUILD_EXAMPLES=ON -B./build
 $ cmake --build ./build/ --parallel
 
-$ ./build/bin/examples/cpu_fft_example  <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-$ ./build/bin/examples/gpu_fft_example  <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-$ Example: ./build/bin/examples/gpu_fft_example 12 1
+$ ./build/bin/example/cpu_fft_example <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+$ ./build/bin/example/gpu_fft_C_C_example <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+$ ./build/bin/example/gpu_fft_R_R_example <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+$ ./build/bin/example/cpu_ffnt_example <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+$ ./build/bin/example/gpu_ffnt_R_R_example <RING_SIZE_IN_LOG2> <BATCH_SIZE>
+$ Example: ./build/bin/example/gpu_fft_R_R_example 12 1
 ```
 
 To run benchmarks:
@@ -55,8 +58,10 @@ To run benchmarks:
 $ cmake -D CMAKE_CUDA_ARCHITECTURES=86 -D GPUFFT_BUILD_BENCHMARKS=ON -B./build
 $ cmake --build ./build/ --parallel
 
-$ ./build/bin/benchmark/gpu_fft_mult_benchmark --disable-blocking-kernel
+$ ./build/bin/benchmark/gpu_fft_C_C_mult_benchmark --disable-blocking-kernel
+$ ./build/bin/benchmark/gpu_fft_R_R_mult_benchmark --disable-blocking-kernel
 $ ./build/bin/benchmark/gpu_fft_benchmark --disable-blocking-kernel
+$ ./build/bin/benchmark/gpu_ffnt_R_R_mult_benchmark --disable-blocking-kernel
 ```
 
 ## Using GPU-FFT in a downstream CMake project
@@ -69,7 +74,7 @@ find_package(CUDAToolkit REQUIRED)
 # ...
 find_package(GPUFFT)
 # ...
-target_link_libraries(<your-target> (PRIVATE|PUBLIC|INTERFACE) GPUNTT::ntt CUDA::cudart)
+target_link_libraries(<your-target> (PRIVATE|PUBLIC|INTERFACE) GPUFFT::fft CUDA::cudart)
 # ...
 set_target_properties(<your-target> PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 # ...

@@ -3,19 +3,39 @@
 # SPDX-License-Identifier: Apache-2.0
 # Developer: Alişah Özcan
 
-file(GLOB_RECURSE LIB_SOURCE_FILES
-    RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
-    CONFIGURE_DEPENDS
-    lib/*.cu
+set(LIB_SOURCE_FILES
+    lib/common_fft.cu
+    lib/fft.cu
+    lib/fft_cpu.cu
 )
 
-file(GLOB_RECURSE LIB_HEADER_FILES
-    RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
-    CONFIGURE_DEPENDS
-    include/*.cuh
+set(LIB_HEADER_FILES
+    include/common_fft.cuh
+    include/complex.cuh
+    include/fft.cuh
+    include/fft_cpu.cuh
 )
 
 add_library(fft STATIC ${LIB_SOURCE_FILES})
+add_library(GPUFFT::fft ALIAS fft)
+target_compile_features(fft PUBLIC cxx_std_17)
+target_compile_options(fft PRIVATE
+    $<$<CONFIG:Release>:-O3 -DNDEBUG>
+    $<$<CONFIG:RelWithDebInfo>:-O3 -g -DNDEBUG>
+    $<$<CONFIG:MinSizeRel>:-Os -DNDEBUG>
+    $<$<CONFIG:Debug>:-g>
+    $<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:--generate-line-info>
+    $<$<AND:$<CONFIG:RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:--generate-line-info>
+)
+option(GPUFFT_ENABLE_WARNINGS "Enable extra warnings for GPUFFT" OFF)
+if(GPUFFT_ENABLE_WARNINGS)
+    target_compile_options(fft PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wall,-Wextra,-Wpedantic>
+    )
+endif()
+
+target_link_libraries(fft PUBLIC CUDA::cudart)
 
 set_target_properties(fft PROPERTIES
   VERSION ${PROJECT_VERSION}
@@ -33,9 +53,9 @@ target_include_directories(
 set_target_properties(fft PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     POSITION_INDEPENDENT_CODE ON
-    CMAKE_CUDA_RESOLVE_DEVICE_SYMBOLS ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
     CUDA_RUNTIME_LIBRARY Static
-    CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES}
+    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
 )
 
 install(TARGETS fft
@@ -45,5 +65,7 @@ install(TARGETS fft
   ARCHIVE DESTINATION ${ARCHIVE_DESTINATION}
 )
 
-install(FILES ${LIB_HEADER_FILES} DESTINATION ${INCLUDES_INSTALL_DIR})
-
+install(
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
+    DESTINATION ${INCLUDES_INSTALL_DIR}
+)
