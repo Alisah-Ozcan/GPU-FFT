@@ -18,7 +18,21 @@ set(LIB_HEADER_FILES
 
 add_library(fft STATIC ${LIB_SOURCE_FILES})
 add_library(GPUFFT::fft ALIAS fft)
-target_compile_features(fft PUBLIC cxx_std_17)
+if(CMAKE_CXX_COMPILE_FEATURES)
+    target_compile_features(fft PUBLIC cxx_std_17)
+else()
+    message(WARNING
+        "CMake does not know C++ compile features for ${CMAKE_CXX_COMPILER_ID} "
+        "${CMAKE_CXX_COMPILER_VERSION}; falling back to -std=c++17"
+    )
+    target_compile_options(fft PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-std=c++17>)
+endif()
+
+if(CMAKE_CUDA_COMPILE_FEATURES)
+    target_compile_features(fft PRIVATE cuda_std_17)
+else()
+    target_compile_options(fft PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--std=c++17>)
+endif()
 target_compile_options(fft PRIVATE
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
     $<$<CONFIG:RelWithDebInfo>:-O3 -g -DNDEBUG>
