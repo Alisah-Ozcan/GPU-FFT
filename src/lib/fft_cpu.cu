@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Developer: Alişah Özcan
 
-#include "fft_cpu.cuh"
+#include "gpufft/fft_cpu.cuh"
 
 namespace gpufft
 {

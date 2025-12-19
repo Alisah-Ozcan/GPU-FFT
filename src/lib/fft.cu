@@ -4,7 +4,7 @@
 // Developer: Alişah Özcan
 // Paper: https://eprint.iacr.org/2023/1410
 
-#include "fft.cuh"
+#include "gpufft/fft.cuh"
 
 namespace gpufft
 {

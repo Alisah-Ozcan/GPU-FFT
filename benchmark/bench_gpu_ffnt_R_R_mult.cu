@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Developer: Alişah Özcan
 
-#include "fft.cuh"
-#include "fft_cpu.cuh"
+#include "gpufft/fft.cuh"
+#include "gpufft/fft_cpu.cuh"
 #include "bench_util.cuh"
 
 using namespace std;

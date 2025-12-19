@@ -8,8 +8,8 @@
 #include <iostream>
 #include <random>
 
-#include "fft.cuh"
-#include "fft_cpu.cuh"
+#include "gpufft/fft.cuh"
+#include "gpufft/fft_cpu.cuh"
 
 using namespace std;
 using namespace gpufft;
