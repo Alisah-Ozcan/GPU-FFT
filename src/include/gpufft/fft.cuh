@@ -63,6 +63,7 @@ namespace gpufft
         int k;
         int outer_iteration_count;
 
+        // The inverse tables store the last_kernel flag here.
         bool not_last_kernel;
     };
 
@@ -504,8 +505,8 @@ namespace gpufft
     {
         return std::unordered_map<int, std::vector<KernelConfig>>{
             {12,
-             {{4, 1, 128, 2, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 2, false},
-              {1, 4, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 2, 0, 9, true}}},
+             {{4, 1, 128, 2, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 2, true},
+              {1, 4, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 2, 0, 9, false}}},
             {13,
              {{8, 1, 64, 4, 512 * sizeof(COMPLEX<T>), 8, 0, 0, 3, true},
               {1, 8, 256, 1, 512 * sizeof(COMPLEX<T>), 8, 3, 0, 9, false}}},
