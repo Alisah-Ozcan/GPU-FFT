@@ -155,7 +155,7 @@ namespace complex_arithmetic
         operator*(const T2& other) const
         {
             return ComplexOperations(real() * static_cast<T1>(other),
-                                     real() * static_cast<T1>(other));
+                                     imag() * static_cast<T1>(other));
         }
 
         // Complex, scalar multiplication equal operator (*=)
