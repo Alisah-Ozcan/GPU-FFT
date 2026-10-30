@@ -28,6 +28,10 @@ namespace gpufft
     std::vector<T> schoolbook_poly_multiplication_without_reduction(
         std::vector<T> a, std::vector<T> b, T modulus, int size);
 
+    // FFT(size) transforms vectors of 2 * size elements (polynomials of size
+    // coefficients, zero padded for multiplication). The root tables hold
+    // size entries for GPU_FFT with n_power = log2(size) + 1, and n_inverse is
+    // 1 / (2 * size).
     template <typename T> class FFT
     {
       public:
