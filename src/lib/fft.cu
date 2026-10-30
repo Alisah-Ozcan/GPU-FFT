@@ -1439,20 +1439,20 @@ namespace gpufft
                     GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
 
-                current_kernel_params =
+                auto& last_kernel_params =
                     kernel_parameters[cfg.n_power]
                                      [kernel_parameters[cfg.n_power].size() -
                                       1];
                 ForwardFFNTCoreRegular<<<
-                    dim3(current_kernel_params.griddim_x,
-                         current_kernel_params.griddim_y, batch_size),
-                    dim3(current_kernel_params.blockdim_x,
-                         current_kernel_params.blockdim_y),
-                    current_kernel_params.shared_memory, cfg.stream>>>(
+                    dim3(last_kernel_params.griddim_x,
+                         last_kernel_params.griddim_y, batch_size),
+                    dim3(last_kernel_params.blockdim_x,
+                         last_kernel_params.blockdim_y),
+                    last_kernel_params.shared_memory, cfg.stream>>>(
                     device_temp, root_of_unity_table,
-                    current_kernel_params.shared_index,
-                    current_kernel_params.logm,
-                    current_kernel_params.outer_iteration_count,
+                    last_kernel_params.shared_index,
+                    last_kernel_params.logm,
+                    last_kernel_params.outer_iteration_count,
                     cfg.n_power - 1, false, false);
                 GPUFFT_CUDA_CHECK(cudaGetLastError());
             }
@@ -1494,20 +1494,20 @@ namespace gpufft
                     GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
 
-                current_kernel_params =
+                auto& last_kernel_params =
                     kernel_parameters[cfg.n_power]
                                      [kernel_parameters[cfg.n_power].size() -
                                       1];
                 InverseFFNTCoreUnique<<<
-                    dim3(current_kernel_params.griddim_x,
-                         current_kernel_params.griddim_y, batch_size),
-                    dim3(current_kernel_params.blockdim_x,
-                         current_kernel_params.blockdim_y),
-                    current_kernel_params.shared_memory, cfg.stream>>>(
+                    dim3(last_kernel_params.griddim_x,
+                         last_kernel_params.griddim_y, batch_size),
+                    dim3(last_kernel_params.blockdim_x,
+                         last_kernel_params.blockdim_y),
+                    last_kernel_params.shared_memory, cfg.stream>>>(
                     device_temp, device_inout, twist_table, root_of_unity_table,
-                    current_kernel_params.shared_index,
-                    current_kernel_params.logm, current_kernel_params.k,
-                    current_kernel_params.outer_iteration_count,
+                    last_kernel_params.shared_index,
+                    last_kernel_params.logm, last_kernel_params.k,
+                    last_kernel_params.outer_iteration_count,
                     cfg.n_power - 1, cfg.mod_inverse);
                 GPUFFT_CUDA_CHECK(cudaGetLastError());
             }
