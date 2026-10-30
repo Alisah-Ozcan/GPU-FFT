@@ -8,6 +8,23 @@
 
 namespace gpufft
 {
+    // The batch is the third grid dimension, and kernels compute global
+    // memory offsets (including the second operand of a multiplication) with
+    // 32-bit integers.
+    static void check_batch_size(int n_power, int batch_size)
+    {
+        if (batch_size <= 0 || batch_size > 65535)
+        {
+            throw std::invalid_argument("Invalid batch_size!");
+        }
+        if ((static_cast<long long>(batch_size) << n_power) >=
+            (1LL << 31))
+        {
+            throw std::invalid_argument(
+                "batch_size * ring size must be less than 2^31!");
+        }
+    }
+
     template <typename T>
     __global__ void
     ForwardCore(COMPLEX<T>* polynomial, COMPLEX<T>* root_of_unity_table,
@@ -526,6 +543,8 @@ namespace gpufft
             throw std::invalid_argument("Invalid n_power range!");
         }
 
+        check_batch_size(cfg.n_power, batch_size);
+
         auto kernel_parameters = (cfg.fft_type == FORWARD)
                                      ? CreateForwardFFTKernel<T>()
                                      : CreateInverseFFTKernel<T>();
@@ -609,6 +628,8 @@ namespace gpufft
         {
             throw std::invalid_argument("Invalid n_power range!");
         }
+
+        check_batch_size(cfg.n_power, batch_size);
 
         auto kernel_parameters = (cfg.fft_type == FORWARD)
                                      ? CreateForwardFFTKernel<T>()
@@ -937,6 +958,8 @@ namespace gpufft
         {
             throw std::invalid_argument("Invalid n_power range!");
         }
+
+        check_batch_size(cfg.n_power, batch_size);
 
         auto kernel_parameters = (cfg.fft_type == FORWARD)
                                      ? CreateForwardSpecialFFTKernel<T>()
@@ -1397,6 +1420,8 @@ namespace gpufft
         {
             throw std::invalid_argument("Invalid n_power range!");
         }
+
+        check_batch_size(cfg.n_power, batch_size);
 
         auto kernel_parameters = (cfg.fft_type == FORWARD)
                                      ? CreateForwardFFNTKernel<T>()
