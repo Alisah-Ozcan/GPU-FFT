@@ -10,10 +10,10 @@ set(LIB_SOURCE_FILES
 )
 
 set(LIB_HEADER_FILES
-    include/common_fft.cuh
-    include/complex.cuh
-    include/fft.cuh
-    include/fft_cpu.cuh
+    include/gpufft/common_fft.cuh
+    include/gpufft/complex.cuh
+    include/gpufft/fft.cuh
+    include/gpufft/fft_cpu.cuh
 )
 
 add_library(fft STATIC ${LIB_SOURCE_FILES})
