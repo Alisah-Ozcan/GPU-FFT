@@ -79,6 +79,17 @@ if(GPUFFT_BUILD_EXAMPLES)
     add_subdirectory(example)
 endif()
 
+#########
+# TESTS #
+#########
+
+option(GPUFFT_BUILD_TESTS "Build GPU-FFT Tests" OFF)
+message(STATUS "GPUFFT_BUILD_TESTS: ${GPUFFT_BUILD_TESTS}")
+if(GPUFFT_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(test)
+endif()
+
 ##############
 # BENCHMARKS #
 ##############

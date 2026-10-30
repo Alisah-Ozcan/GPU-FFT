@@ -76,6 +76,20 @@ cmake --build build --parallel
 Example: ./build/bin/example/gpu_fft_R_R_example 12 1
 ```
 
+#### Tests
+
+The tests compare every GPU-FFT host API variant (complex and real input/output, X^N-1 and X^N+1, the fused multiplication, the special FFT and the FFNT) against double precision CPU references for 32-bit and 64-bit data, and check small polynomial products exactly.
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=86 -DGPUFFT_BUILD_TESTS=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+- `-DGPUFFT_TEST_MAX_LOGN=<N>` sets the largest size covered by the regular suites (default `20`).
+- The `large` suites cover the sizes above it, up to 2^24, with one polynomial each.
+- A single suite can be run directly: `./build/bin/test/fft_tests --bits 64 --suite special --max-logn 16`
+
 To run benchmarks:
 
 ```bash
