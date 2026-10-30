@@ -242,8 +242,14 @@ namespace complex_arithmetic
 
         // Complex Exponentiation of complex number
         __host__ __device__ __forceinline__ ComplexOperations
-        exp(int& exponent) const
+        exp(int exponent) const
         {
+            if (exponent < 0)
+            {
+                return inverse().exp(0ULL -
+                                     static_cast<unsigned long long>(exponent));
+            }
+
             ComplexOperations result(1.0, 0.0);
 
             if (exponent == 0)
@@ -267,7 +273,7 @@ namespace complex_arithmetic
 
         // Complex Exponentiation of complex number
         __host__ __device__ __forceinline__ ComplexOperations
-        exp(unsigned long long& exponent) const
+        exp(unsigned long long exponent) const
         {
             ComplexOperations result(1.0, 0);
 
