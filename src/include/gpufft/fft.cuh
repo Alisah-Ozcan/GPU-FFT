@@ -7,17 +7,11 @@
 #ifndef FFT_CORE_H
 #define FFT_CORE_H
 
-#include <curand_kernel.h>
-#include <stdio.h>
-
-#include <chrono>
-#include <fstream>
-#include <iostream>
-#include <functional>
 #include <unordered_map>
+#include <vector>
 
 #include "common_fft.cuh"
-#include "fft_cpu.cuh"
+#include "complex.cuh"
 #include "cuda_runtime.h"
 
 // --------------------- //

@@ -4,6 +4,8 @@
 // Developer: Alişah Özcan
 // Paper: https://eprint.iacr.org/2023/1410
 
+#include <stdexcept>
+
 #include "gpufft/fft.cuh"
 
 namespace gpufft

@@ -6,18 +6,13 @@
 #ifndef CPU_FFT_H
 #define CPU_FFT_H
 
+#include "common_fft.cuh"
 #include "complex.cuh"
 
 namespace gpufft
 {
 
     int bitreverse(int index, int n_power);
-
-    enum ReductionPolynomial
-    {
-        X_N_plus,
-        X_N_minus
-    }; // X_N_minus: X^n - 1, X_N_plus: X^n + 1
 
     template <typename T>
     std::vector<T> schoolbook_poly_multiplication(std::vector<T> a,

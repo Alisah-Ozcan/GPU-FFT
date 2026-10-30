@@ -50,5 +50,11 @@ namespace gpufft
 
     void customAssert(bool condition, const std::string& errorMessage);
 
+    enum ReductionPolynomial
+    {
+        X_N_plus,
+        X_N_minus
+    }; // X_N_minus: X^n - 1, X_N_plus: X^n + 1
+
 } // namespace gpufft
 #endif // COMMON_FFT_H
