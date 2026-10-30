@@ -14,7 +14,7 @@
 using namespace std;
 using namespace gpufft;
 
-unsigned long long q;
+int q;
 int logn;
 int batch;
 int n;
@@ -22,9 +22,32 @@ int n;
 // typedef Float32 TestDataType; // Use for 32-bit benchmark
 typedef Float64 TestDataType; // Use for 64-bit benchmark
 
+// a * b mod X^n + 1, without reduction of the coefficients
+vector<long long> negacyclic_multiplication(const vector<int>& a,
+                                            const vector<int>& b, int size)
+{
+    vector<long long> result(size, 0);
+    for (int i = 0; i < size; i++)
+    {
+        for (int j = 0; j < size; j++)
+        {
+            long long mult = static_cast<long long>(a[i]) * b[j];
+            if (i + j < size)
+            {
+                result[i + j] += mult;
+            }
+            else
+            {
+                result[i + j - size] -= mult;
+            }
+        }
+    }
+    return result;
+}
+
 int main(int argc, char* argv[])
 {
-    if (argc < 2)
+    if (argc < 3)
     {
         q = 7;
         logn = 12;
@@ -35,7 +58,7 @@ int main(int argc, char* argv[])
     {
         q = 7;
         logn = atoi(argv[1]);
-        batch = 1;
+        batch = atoi(argv[2]);
         n = 1 << logn;
 
         if ((logn < 12) || (24 < logn))
@@ -48,39 +71,39 @@ int main(int argc, char* argv[])
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    unsigned long long minNumber = 0;
-    unsigned long long maxNumber = q - 1;
+    int minNumber = 0;
+    int maxNumber = q - 1;
     std::uniform_int_distribution<int> dis(minNumber, maxNumber);
 
-    vector<unsigned long long> A_poly(n);
-    vector<unsigned long long> B_poly(n);
+    vector<vector<int>> A_poly(batch, vector<int>(n));
+    vector<vector<int>> B_poly(batch, vector<int>(n));
 
-    vector<TestDataType> A_poly_f(n);
-    vector<TestDataType> B_poly_f(n);
-    for (int i = 0; i < n; i++)
+    vector<TestDataType> poly_f(2 * batch * n); // A and B together
+    for (int j = 0; j < batch; j++)
     {
-        A_poly[i] = dis(gen);
-        A_poly_f[i] = A_poly[i];
+        for (int i = 0; i < n; i++)
+        {
+            A_poly[j][i] = dis(gen);
+            poly_f[(j * n) + i] = A_poly[j][i];
 
-        B_poly[i] = dis(gen);
-        B_poly_f[i] = B_poly[i];
+            B_poly[j][i] = dis(gen);
+            poly_f[((j + batch) * n) + i] = B_poly[j][i];
+        }
     }
 
     FFNT<TestDataType> fft_generator(n);
 
     COMPLEX<TestDataType>* Temp_Datas;
-    GPUFFT_CUDA_CHECK(
-        cudaMalloc(&Temp_Datas, 2 * (n >> 1) * sizeof(COMPLEX<TestDataType>)));
+    GPUFFT_CUDA_CHECK(cudaMalloc(&Temp_Datas, 2 * batch * (n >> 1) *
+                                                  sizeof(COMPLEX<TestDataType>)));
 
     TestDataType* Forward_InOut_Datas;
-    GPUFFT_CUDA_CHECK(
-        cudaMalloc(&Forward_InOut_Datas, 2 * n * sizeof(TestDataType)));
+    GPUFFT_CUDA_CHECK(cudaMalloc(&Forward_InOut_Datas,
+                                 2 * batch * n * sizeof(TestDataType)));
 
-    cudaMemcpy(Forward_InOut_Datas, A_poly_f.data(), n * sizeof(TestDataType),
-               cudaMemcpyHostToDevice);
-
-    cudaMemcpy(Forward_InOut_Datas + n, B_poly_f.data(),
-               n * sizeof(TestDataType), cudaMemcpyHostToDevice);
+    GPUFFT_CUDA_CHECK(cudaMemcpy(Forward_InOut_Datas, poly_f.data(),
+                                 2 * batch * n * sizeof(TestDataType),
+                                 cudaMemcpyHostToDevice));
 
     /////////////////////////////////////////////////////////////////////////
 
@@ -156,29 +179,38 @@ int main(int argc, char* argv[])
     GPU_FFNT(Forward_InOut_Datas, Temp_Datas, Untwist_Table_Device,
              Inverse_Root_Table_Device, cfg_ifft, batch, true);
 
-    std::vector<TestDataType> test(n);
+    std::vector<TestDataType> test(batch * n);
     GPUFFT_CUDA_CHECK(cudaMemcpy(test.data(), Forward_InOut_Datas,
-                                 n * sizeof(TestDataType),
+                                 batch * n * sizeof(TestDataType),
                                  cudaMemcpyDeviceToHost));
 
-    vector<unsigned long long> test_school =
-        schoolbook_poly_multiplication(A_poly, B_poly, q, n);
-
-    for (int i = 0; i < n; i++)
+    for (int j = 0; j < batch; j++)
     {
-        // signed gpu_result = std::round(test[i]) ;
-        unsigned long long gpu_result = std::round(test[i]);
-        gpu_result = gpu_result % q;
-        if (test_school[i] != (gpu_result))
-        {
-            throw runtime_error("ERROR");
-        }
+        vector<long long> test_school =
+            negacyclic_multiplication(A_poly[j], B_poly[j], n);
 
-        if (i < 10)
+        for (int i = 0; i < n; i++)
         {
-            cout << i << ": " << test_school[i] << " - " << gpu_result << endl;
+            long long gpu_result = std::llround(test[(j * n) + i]);
+            if (test_school[i] != gpu_result)
+            {
+                throw runtime_error("ERROR");
+            }
+
+            if (i < 10)
+            {
+                cout << i << ": " << test_school[i] << " - " << gpu_result
+                     << endl;
+            }
         }
     }
+
+    GPUFFT_CUDA_CHECK(cudaFree(Temp_Datas));
+    GPUFFT_CUDA_CHECK(cudaFree(Forward_InOut_Datas));
+    GPUFFT_CUDA_CHECK(cudaFree(Root_Table_Device));
+    GPUFFT_CUDA_CHECK(cudaFree(Inverse_Root_Table_Device));
+    GPUFFT_CUDA_CHECK(cudaFree(Twist_Table_Device));
+    GPUFFT_CUDA_CHECK(cudaFree(Untwist_Table_Device));
 
     return EXIT_SUCCESS;
 }

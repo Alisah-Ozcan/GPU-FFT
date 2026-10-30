@@ -38,9 +38,9 @@ int main(int argc, char* argv[])
         batch = atoi(argv[2]);
         n = 1 << logn;
 
-        if ((logn < 12) || (24 < logn))
+        if ((logn < 11) || (23 < logn))
         {
-            throw std::runtime_error("LOGN should be in range 12 to 24.");
+            throw std::runtime_error("LOGN should be in range 11 to 23.");
         }
     }
 
@@ -164,8 +164,8 @@ int main(int argc, char* argv[])
     GPU_FFT(InOut_Datas, Temp_Datas, Inverse_Root_Table_Device, cfg_ifft, batch,
             true);
 
-    TestDataType test[batch * 2 * n];
-    GPUFFT_CUDA_CHECK(cudaMemcpy(test, InOut_Datas,
+    std::vector<TestDataType> test(batch * 2 * n);
+    GPUFFT_CUDA_CHECK(cudaMemcpy(test.data(), InOut_Datas,
                                  batch * n * 2 * sizeof(TestDataType),
                                  cudaMemcpyDeviceToHost));
 
@@ -188,6 +188,11 @@ int main(int argc, char* argv[])
             }
         }
     }
+
+    GPUFFT_CUDA_CHECK(cudaFree(Temp_Datas));
+    GPUFFT_CUDA_CHECK(cudaFree(InOut_Datas));
+    GPUFFT_CUDA_CHECK(cudaFree(Root_Table_Device));
+    GPUFFT_CUDA_CHECK(cudaFree(Inverse_Root_Table_Device));
 
     return EXIT_SUCCESS;
 }
