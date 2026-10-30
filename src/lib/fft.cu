@@ -142,6 +142,7 @@ namespace gpufft
 
                 in_shared_address =
                     ((shared_addresss >> t_) << t_) + shared_addresss;
+                __syncwarp();
             }
             __syncthreads();
         }
@@ -394,6 +395,7 @@ namespace gpufft
 
                 in_shared_address =
                     ((shared_addresss >> t_) << t_) + shared_addresss;
+                __syncwarp();
             }
             __syncthreads();
         }
@@ -833,6 +835,7 @@ namespace gpufft
 
                 in_shared_address =
                     ((shared_addresss >> t_) << t_) + shared_addresss;
+                __syncwarp();
             }
             __syncthreads();
         }
@@ -1202,6 +1205,7 @@ namespace gpufft
 
                 in_shared_address =
                     ((shared_addresss >> t_) << t_) + shared_addresss;
+                __syncwarp();
             }
             __syncthreads();
         }
