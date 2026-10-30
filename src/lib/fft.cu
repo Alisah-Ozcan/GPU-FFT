@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include "gpufft/fft.cuh"
+#include "gpufft/fft_device.cuh"
 
 namespace gpufft
 {
@@ -32,141 +33,19 @@ namespace gpufft
                 int shared_index, int logm, int outer_iteration_count,
                 int N_power, bool not_last_kernel, bool reduction_poly_check)
     {
-        const int idx_x = threadIdx.x;
-        const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
-        const int block_z = blockIdx.z;
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(logm, outer_iteration_count, N_power);
+        const location_t global_address = poly_address(thread, N_power);
 
-        // extern __shared__ COMPLEX<T> shared_memory[];
-        extern __shared__ char shared_memory_typed[];
-        COMPLEX<T>* shared_memory =
-            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
-
-        int t_2 = N_power - logm - 1;
-        location_t offset = 1 << (N_power - logm - 1);
-        int t_ = shared_index;
-        int loops = outer_iteration_count;
-        location_t m = (location_t) 1 << logm;
-
-        location_t global_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (2 * block_y * offset) +
-            (location_t) (block_z << N_power);
-        location_t omega_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (block_y * offset);
-        location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
-
-        // Load data from global & store to shared
-        shared_memory[shared_addresss] = polynomial[global_addresss];
-        shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-            polynomial[global_addresss + offset];
-
-        int t = 1 << t_;
-        int in_shared_address =
-            ((shared_addresss >> t_) << t_) + shared_addresss;
-
-        location_t current_root_index;
-        if (not_last_kernel)
-        {
-#pragma unroll
-            for (int lp = 0; lp < loops; lp++)
-            {
-                //__syncthreads();
-
-                if (reduction_poly_check)
-                { // X_N_minus
-                    current_root_index = (omega_addresss >> t_2);
-                }
-                else
-                { // X_N_plus
-                    current_root_index = m + (omega_addresss >> t_2);
-                }
-
-                CooleyTukeyUnit(shared_memory[in_shared_address],
-                                shared_memory[in_shared_address + t],
-                                root_of_unity_table[current_root_index]);
-
-                t = t >> 1;
-                t_2 -= 1;
-                t_ -= 1;
-                m <<= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncthreads();
-            }
-            //__syncthreads();
-        }
-        else
-        {
-#pragma unroll
-            for (int lp = 0; lp < (shared_index - 5); lp++)
-            {
-                //__syncthreads();
-
-                if (reduction_poly_check)
-                { // X_N_minus
-                    current_root_index = (omega_addresss >> t_2);
-                }
-                else
-                { // X_N_plus
-                    current_root_index = m + (omega_addresss >> t_2);
-                }
-
-                CooleyTukeyUnit(shared_memory[in_shared_address],
-                                shared_memory[in_shared_address + t],
-                                root_of_unity_table[current_root_index]);
-
-                t = t >> 1;
-                t_2 -= 1;
-                t_ -= 1;
-                m <<= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncthreads();
-            }
-            //__syncthreads();
-
-#pragma unroll
-            for (int lp = 0; lp < 6; lp++)
-            {
-                if (reduction_poly_check)
-                { // X_N_minus
-                    current_root_index = (omega_addresss >> t_2);
-                }
-                else
-                { // X_N_plus
-                    current_root_index = m + (omega_addresss >> t_2);
-                }
-
-                CooleyTukeyUnit(shared_memory[in_shared_address],
-                                shared_memory[in_shared_address + t],
-                                root_of_unity_table[current_root_index]);
-
-                t = t >> 1;
-                t_2 -= 1;
-                t_ -= 1;
-                m <<= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncwarp();
-            }
-            __syncthreads();
-        }
-
-        polynomial[global_addresss] = shared_memory[shared_addresss];
-        polynomial[global_addresss + offset] =
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
+        StageLoad(thread, shared_memory, polynomial, global_address);
+        DecreasingStageExecute<CooleyTukey>(
+            thread, shared_memory, root_of_unity_table,
+            PolyRoots<false>{reduction_poly_check, N_power - logm - 1,
+                             (location_t) 1 << logm},
+            shared_index, outer_iteration_count, not_last_kernel,
+            shared_index - 5);
+        StageStore(thread, shared_memory, polynomial, global_address);
     }
 
     template <typename T>
@@ -176,105 +55,26 @@ namespace gpufft
                 int N_power, COMPLEX<T> n_inverse, bool last_kernel,
                 bool NTT_mult, int offset2, bool reduction_poly_check)
     {
-        const int idx_x = threadIdx.x;
-        const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
-        const int block_z = blockIdx.z;
-
-        // extern __shared__ COMPLEX<T> shared_memory[];
-        extern __shared__ char shared_memory_typed[];
-        COMPLEX<T>* shared_memory =
-            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
-
-        int t_2 = N_power - logm - 1;
-        location_t offset = 1 << (N_power - k - 1);
-        int t_ = (shared_index + 1) - outer_iteration_count;
-        int loops = outer_iteration_count;
-        location_t m = (location_t) 1 << logm;
-
-        location_t global_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (2 * block_y * offset) +
-            (location_t) (block_z << N_power);
-        ;
-        location_t omega_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (block_y * offset);
-        location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(k, outer_iteration_count, N_power);
+        const location_t global_address = poly_address(thread, N_power);
 
         if (NTT_mult)
-        {
-            COMPLEX<T> a0 = polynomial[global_addresss];
-            COMPLEX<T> a1 = polynomial[global_addresss + offset];
-
-            COMPLEX<T> b0 = polynomial[global_addresss + offset2];
-            COMPLEX<T> b1 = polynomial[global_addresss + offset + offset2];
-
-            shared_memory[shared_addresss] = a0 * b0;
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-                a1 * b1;
-        }
+            StageLoadProduct(thread, shared_memory, polynomial, global_address,
+                             offset2);
         else
-        {
-            shared_memory[shared_addresss] = polynomial[global_addresss];
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-                polynomial[global_addresss + offset];
-        }
-
-        int t = 1 << t_;
-        int in_shared_address =
-            ((shared_addresss >> t_) << t_) + shared_addresss;
-
-        location_t current_root_index;
-#pragma unroll
-        for (int lp = 0; lp < loops; lp++)
-        {
-            __syncthreads();
-
-            if (reduction_poly_check)
-            { // X_N_minus
-                current_root_index = (omega_addresss >> t_2);
-            }
-            else
-            { // X_N_plus
-                current_root_index = m + (omega_addresss >> t_2);
-            }
-
-            GentlemanSandeUnit(shared_memory[in_shared_address],
-                               shared_memory[in_shared_address + t],
-                               inverse_root_of_unity_table[current_root_index]);
-
-            t = t << 1;
-            t_2 += 1;
-            t_ += 1;
-            m >>= 1;
-
-            in_shared_address =
-                ((shared_addresss >> t_) << t_) + shared_addresss;
-        }
-        __syncthreads();
-
+            StageLoad(thread, shared_memory, polynomial, global_address);
+        IncreasingStageExecute<GentlemanSande>(
+            thread, shared_memory, inverse_root_of_unity_table,
+            PolyRoots<true>{reduction_poly_check, N_power - logm - 1,
+                            (location_t) 1 << logm},
+            (shared_index + 1) - outer_iteration_count, outer_iteration_count);
         if (last_kernel)
-        {
-            polynomial[global_addresss] =
-                shared_memory[shared_addresss] * n_inverse;
-            polynomial[global_addresss + offset] =
-                shared_memory[shared_addresss + (blockDim.x * blockDim.y)] *
-                n_inverse;
-        }
+            StageStoreScaled(thread, shared_memory, polynomial, global_address,
+                             n_inverse);
         else
-        {
-            polynomial[global_addresss] = shared_memory[shared_addresss];
-            polynomial[global_addresss + offset] =
-                shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
-        }
+            StageStore(thread, shared_memory, polynomial, global_address);
     }
 
     template <typename T>
@@ -284,142 +84,19 @@ namespace gpufft
                                 int outer_iteration_count, int N_power,
                                 bool not_last_kernel, bool reduction_poly_check)
     {
-        const int idx_x = threadIdx.x;
-        const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
-        const int block_z = blockIdx.z;
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(logm, outer_iteration_count, N_power);
+        const location_t global_address = poly_address(thread, N_power);
 
-        // extern __shared__ COMPLEX<T> shared_memory[];
-        extern __shared__ char shared_memory_typed[];
-        COMPLEX<T>* shared_memory =
-            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
-
-        int t_2 = N_power - logm - 1;
-        location_t offset = 1 << (N_power - logm - 1);
-        int t_ = shared_index;
-        int loops = outer_iteration_count;
-        location_t m = (location_t) 1 << logm;
-
-        location_t global_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (2 * block_y * offset) +
-            (location_t) (block_z << N_power);
-        location_t omega_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (block_y * offset);
-        location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
-
-        // Load data from global & store to shared
-
-        shared_memory[shared_addresss] = COMPLEX<T>(input[global_addresss]);
-        shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-            COMPLEX<T>(input[global_addresss + offset]);
-
-        int t = 1 << t_;
-        int in_shared_address =
-            ((shared_addresss >> t_) << t_) + shared_addresss;
-
-        location_t current_root_index;
-        if (not_last_kernel)
-        {
-#pragma unroll
-            for (int lp = 0; lp < loops; lp++)
-            {
-                //__syncthreads();
-
-                if (reduction_poly_check)
-                { // X_N_minus
-                    current_root_index = (omega_addresss >> t_2);
-                }
-                else
-                { // X_N_plus
-                    current_root_index = m + (omega_addresss >> t_2);
-                }
-
-                CooleyTukeyUnit(shared_memory[in_shared_address],
-                                shared_memory[in_shared_address + t],
-                                root_of_unity_table[current_root_index]);
-
-                t = t >> 1;
-                t_2 -= 1;
-                t_ -= 1;
-                m <<= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncthreads();
-            }
-            //__syncthreads();
-        }
-        else
-        {
-#pragma unroll
-            for (int lp = 0; lp < (shared_index - 5); lp++)
-            {
-                //__syncthreads();
-
-                if (reduction_poly_check)
-                { // X_N_minus
-                    current_root_index = (omega_addresss >> t_2);
-                }
-                else
-                { // X_N_plus
-                    current_root_index = m + (omega_addresss >> t_2);
-                }
-
-                CooleyTukeyUnit(shared_memory[in_shared_address],
-                                shared_memory[in_shared_address + t],
-                                root_of_unity_table[current_root_index]);
-
-                t = t >> 1;
-                t_2 -= 1;
-                t_ -= 1;
-                m <<= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncthreads();
-            }
-            //__syncthreads();
-
-#pragma unroll
-            for (int lp = 0; lp < 6; lp++)
-            {
-                if (reduction_poly_check)
-                { // X_N_minus
-                    current_root_index = (omega_addresss >> t_2);
-                }
-                else
-                { // X_N_plus
-                    current_root_index = m + (omega_addresss >> t_2);
-                }
-
-                CooleyTukeyUnit(shared_memory[in_shared_address],
-                                shared_memory[in_shared_address + t],
-                                root_of_unity_table[current_root_index]);
-
-                t = t >> 1;
-                t_2 -= 1;
-                t_ -= 1;
-                m <<= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncwarp();
-            }
-            __syncthreads();
-        }
-
-        polynomial[global_addresss] = shared_memory[shared_addresss];
-        polynomial[global_addresss + offset] =
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
+        StageLoad(thread, shared_memory, input, global_address);
+        DecreasingStageExecute<CooleyTukey>(
+            thread, shared_memory, root_of_unity_table,
+            PolyRoots<false>{reduction_poly_check, N_power - logm - 1,
+                             (location_t) 1 << logm},
+            shared_index, outer_iteration_count, not_last_kernel,
+            shared_index - 5);
+        StageStore(thread, shared_memory, polynomial, global_address);
     }
 
     template <typename T>
@@ -430,107 +107,26 @@ namespace gpufft
                 COMPLEX<T> n_inverse, bool last_kernel, bool NTT_mult,
                 int offset2, bool reduction_poly_check)
     {
-        const int idx_x = threadIdx.x;
-        const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
-        const int block_z = blockIdx.z;
-
-        // extern __shared__ COMPLEX<T> shared_memory[];
-        extern __shared__ char shared_memory_typed[];
-        COMPLEX<T>* shared_memory =
-            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
-
-        int t_2 = N_power - logm - 1;
-        location_t offset = 1 << (N_power - k - 1);
-        int t_ = (shared_index + 1) - outer_iteration_count;
-        int loops = outer_iteration_count;
-        location_t m = (location_t) 1 << logm;
-
-        location_t global_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (2 * block_y * offset) +
-            (location_t) (block_z << N_power);
-        ;
-        location_t omega_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (block_y * offset);
-        location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(k, outer_iteration_count, N_power);
+        const location_t global_address = poly_address(thread, N_power);
 
         if (NTT_mult)
-        {
-            COMPLEX<T> a0 = polynomial[global_addresss];
-            COMPLEX<T> a1 = polynomial[global_addresss + offset];
-
-            COMPLEX<T> b0 = polynomial[global_addresss + offset2];
-            COMPLEX<T> b1 = polynomial[global_addresss + offset + offset2];
-
-            shared_memory[shared_addresss] = a0 * b0;
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-                a1 * b1;
-        }
+            StageLoadProduct(thread, shared_memory, polynomial, global_address,
+                             offset2);
         else
-        {
-            shared_memory[shared_addresss] = polynomial[global_addresss];
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-                polynomial[global_addresss + offset];
-        }
-
-        int t = 1 << t_;
-        int in_shared_address =
-            ((shared_addresss >> t_) << t_) + shared_addresss;
-
-        location_t current_root_index;
-#pragma unroll
-        for (int lp = 0; lp < loops; lp++)
-        {
-            __syncthreads();
-
-            if (reduction_poly_check)
-            { // X_N_minus
-                current_root_index = (omega_addresss >> t_2);
-            }
-            else
-            { // X_N_plus
-                current_root_index = m + (omega_addresss >> t_2);
-            }
-
-            GentlemanSandeUnit(shared_memory[in_shared_address],
-                               shared_memory[in_shared_address + t],
-                               inverse_root_of_unity_table[current_root_index]);
-
-            t = t << 1;
-            t_2 += 1;
-            t_ += 1;
-            m >>= 1;
-
-            in_shared_address =
-                ((shared_addresss >> t_) << t_) + shared_addresss;
-        }
-        __syncthreads();
-
+            StageLoad(thread, shared_memory, polynomial, global_address);
+        IncreasingStageExecute<GentlemanSande>(
+            thread, shared_memory, inverse_root_of_unity_table,
+            PolyRoots<true>{reduction_poly_check, N_power - logm - 1,
+                            (location_t) 1 << logm},
+            (shared_index + 1) - outer_iteration_count, outer_iteration_count);
         if (last_kernel)
-        {
-            output[global_addresss] =
-                (shared_memory[shared_addresss] * n_inverse).real();
-            output[global_addresss + offset] =
-                (shared_memory[shared_addresss + (blockDim.x * blockDim.y)] *
-                 n_inverse)
-                    .real();
-        }
+            StageStoreScaled(thread, shared_memory, output, global_address,
+                             n_inverse);
         else
-        {
-            output[global_addresss] = shared_memory[shared_addresss].real();
-            output[global_addresss + offset] =
-                shared_memory[shared_addresss + (blockDim.x * blockDim.y)]
-                    .real();
-        }
+            StageStore(thread, shared_memory, output, global_address);
     }
 
     template <typename T>
@@ -766,128 +362,21 @@ namespace gpufft
                         int shared_index, int logm, int outer_iteration_count,
                         int N_power, COMPLEX<T> n_inverse, bool not_last_kernel)
     {
-        const int idx_x = threadIdx.x;
-        const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
-        const int block_z = blockIdx.z;
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(logm, outer_iteration_count, N_power);
+        const location_t global_address = poly_address(thread, N_power);
 
-        // extern __shared__ COMPLEX<T> shared_memory[];
-        extern __shared__ char shared_memory_typed[];
-        COMPLEX<T>* shared_memory =
-            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
-
-        location_t offset = 1 << (N_power - logm - 1);
-        int t_ = 8;
-        int loops = outer_iteration_count;
-        location_t m = (location_t) 1 << (N_power - logm - 1);
-
-        location_t global_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (2 * block_y * offset) +
-            (location_t) (block_z << N_power);
-        location_t omega_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (block_y * offset);
-
-        location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
-
-        // Load data from global & store to shared
-        shared_memory[shared_addresss] = polynomial[global_addresss];
-        shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-            polynomial[global_addresss + offset];
-
-        int t = 1 << t_;
-        int in_shared_address =
-            ((shared_addresss >> t_) << t_) + shared_addresss;
-
-        location_t current_root_index;
+        StageLoad(thread, shared_memory, polynomial, global_address);
+        DecreasingStageExecute<GentlemanSande>(
+            thread, shared_memory, root_of_unity_table,
+            SpecialRoots<false>{(location_t) 1 << (N_power - logm - 1)}, 8,
+            outer_iteration_count, not_last_kernel, 3);
         if (not_last_kernel)
-        {
-#pragma unroll
-            for (int lp = 0; lp < loops; lp++)
-            {
-                //__syncthreads();
-
-                current_root_index = m + (omega_addresss & (m - 1));
-
-                GentlemanSandeUnit(shared_memory[in_shared_address],
-                                   shared_memory[in_shared_address + t],
-                                   root_of_unity_table[current_root_index]);
-
-                t = t >> 1;
-                t_ -= 1;
-                m >>= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncthreads();
-            }
-            //__syncthreads();
-        }
+            StageStore(thread, shared_memory, polynomial, global_address);
         else
-        {
-#pragma unroll
-            for (int lp = 0; lp < 3; lp++)
-            {
-                //__syncthreads();
-
-                current_root_index = m + (omega_addresss & (m - 1));
-
-                GentlemanSandeUnit(shared_memory[in_shared_address],
-                                   shared_memory[in_shared_address + t],
-                                   root_of_unity_table[current_root_index]);
-
-                t = t >> 1;
-                t_ -= 1;
-                m >>= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncthreads();
-            }
-            //__syncthreads();
-
-#pragma unroll
-            for (int lp = 0; lp < 6; lp++)
-            {
-                current_root_index = m + (omega_addresss & (m - 1));
-
-                GentlemanSandeUnit(shared_memory[in_shared_address],
-                                   shared_memory[in_shared_address + t],
-                                   root_of_unity_table[current_root_index]);
-
-                t = t >> 1;
-                t_ -= 1;
-                m >>= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncwarp();
-            }
-            __syncthreads();
-        }
-
-        if (not_last_kernel)
-        {
-            polynomial[global_addresss] = shared_memory[shared_addresss];
-            polynomial[global_addresss + offset] =
-                shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
-        }
-        else
-        {
-            polynomial[global_addresss] =
-                shared_memory[shared_addresss] * n_inverse;
-            polynomial[global_addresss + offset] =
-                shared_memory[shared_addresss + (blockDim.x * blockDim.y)] *
-                n_inverse;
-        }
+            StageStoreScaled(thread, shared_memory, polynomial, global_address,
+                             n_inverse);
     }
 
     template <typename T>
@@ -896,70 +385,17 @@ namespace gpufft
                                         int shared_index, int logm, int k,
                                         int outer_iteration_count, int N_power)
     {
-        const int idx_x = threadIdx.x;
-        const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
-        const int block_z = blockIdx.z;
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(k, outer_iteration_count, N_power);
+        const location_t global_address = poly_address(thread, N_power);
 
-        // extern __shared__ COMPLEX<T> shared_memory[];
-        extern __shared__ char shared_memory_typed[];
-        COMPLEX<T>* shared_memory =
-            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
-
-        location_t offset = 1 << (N_power - k - 1);
-        int t_ = (shared_index + 1) - outer_iteration_count;
-        int loops = outer_iteration_count;
-        location_t m = (location_t) 1 << (N_power - logm - 1);
-
-        location_t global_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (2 * block_y * offset) +
-            (location_t) (block_z << N_power);
-
-        location_t omega_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (block_y * offset);
-        location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
-
-        shared_memory[shared_addresss] = polynomial[global_addresss];
-        shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-            polynomial[global_addresss + offset];
-
-        int t = 1 << t_;
-        int in_shared_address =
-            ((shared_addresss >> t_) << t_) + shared_addresss;
-
-        location_t current_root_index;
-#pragma unroll
-        for (int lp = 0; lp < loops; lp++)
-        {
-            __syncthreads();
-
-            current_root_index = m + (omega_addresss & (m - 1));
-
-            CooleyTukeyUnit(shared_memory[in_shared_address],
-                            shared_memory[in_shared_address + t],
-                            inverse_root_of_unity_table[current_root_index]);
-
-            t = t << 1;
-            t_ += 1;
-            m <<= 1;
-
-            in_shared_address =
-                ((shared_addresss >> t_) << t_) + shared_addresss;
-        }
-        __syncthreads();
-
-        polynomial[global_addresss] = shared_memory[shared_addresss];
-        polynomial[global_addresss + offset] =
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
+        StageLoad(thread, shared_memory, polynomial, global_address);
+        IncreasingStageExecute<CooleyTukey>(
+            thread, shared_memory, inverse_root_of_unity_table,
+            SpecialRoots<true>{(location_t) 1 << (N_power - logm - 1)},
+            (shared_index + 1) - outer_iteration_count, outer_iteration_count);
+        StageStore(thread, shared_memory, polynomial, global_address);
     }
 
     template <typename T>
@@ -1059,86 +495,20 @@ namespace gpufft
                           COMPLEX<T>* root_of_unity_table, int shared_index,
                           int logm, int outer_iteration_count, int N_power)
     {
-        const int idx_x = threadIdx.x;
-        const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
-        const int block_z = blockIdx.z;
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(logm, outer_iteration_count, N_power);
 
-        // extern __shared__ COMPLEX<T> shared_memory[];
-        extern __shared__ char shared_memory_typed[];
-        COMPLEX<T>* shared_memory =
-            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
-
-        int t_2 = N_power - logm - 1;
-        location_t offset = 1 << (N_power - logm - 1);
-        int t_ = shared_index;
-        int loops = outer_iteration_count;
-        // Do not forget to change here!
-
-        location_t global_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (2 * block_y * offset);
-
-        location_t global_addresss_in =
-            global_addresss + (location_t) (block_z << (N_power + 1));
-        location_t global_addresss_out =
-            global_addresss + (location_t) (block_z << (N_power));
-
-        location_t omega_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (block_y * offset);
-        location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
-
-        T real_part1 = polynomial_in[global_addresss_in];
-        T imaginary_part1 = polynomial_in[global_addresss_in + (1 << N_power)];
-        COMPLEX<T> part1(real_part1, imaginary_part1); // fold
-        COMPLEX<T> twist_part1 = twist_table[global_addresss];
-        part1 = part1 * twist_part1; // twist
-
-        T real_part2 = polynomial_in[global_addresss_in + offset];
-        T imaginary_part2 =
-            polynomial_in[global_addresss_in + offset + (1 << N_power)];
-        COMPLEX<T> part2(real_part2, imaginary_part2); // fold
-        COMPLEX<T> twist_part2 = twist_table[global_addresss + offset];
-        part2 = part2 * twist_part2; // twist
-
-        // Load data from global & store to shared
-        shared_memory[shared_addresss] = part1;
-        shared_memory[shared_addresss + (blockDim.x * blockDim.y)] = part2;
-
-        int t = 1 << t_;
-        int in_shared_address =
-            ((shared_addresss >> t_) << t_) + shared_addresss;
-
-#pragma unroll
-        for (int lp = 0; lp < loops; lp++)
-        {
-            //__syncthreads();
-
-            CooleyTukeyUnit(shared_memory[in_shared_address],
-                            shared_memory[in_shared_address + t],
-                            root_of_unity_table[(omega_addresss >> t_2)]);
-
-            t = t >> 1;
-            t_2 -= 1;
-            t_ -= 1;
-
-            in_shared_address =
-                ((shared_addresss >> t_) << t_) + shared_addresss;
-            __syncthreads();
-        }
+        StageLoadFoldTwist(thread, shared_memory, polynomial_in,
+                           poly_address(thread, N_power + 1), twist_table,
+                           N_power);
+        DecreasingStageExecute<CooleyTukey>(
+            thread, shared_memory, root_of_unity_table,
+            CyclicRoots<false>{N_power - logm - 1}, shared_index,
+            outer_iteration_count, true, 0);
         __syncthreads();
-
-        polynomial_out[global_addresss_out] = shared_memory[shared_addresss];
-        polynomial_out[global_addresss_out + offset] =
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
+        StageStore(thread, shared_memory, polynomial_out,
+                   poly_address(thread, N_power));
     }
 
     template <typename T>
@@ -1148,109 +518,17 @@ namespace gpufft
                                            int outer_iteration_count,
                                            int N_power, bool not_last_kernel)
     {
-        const int idx_x = threadIdx.x;
-        const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
-        const int block_z = blockIdx.z;
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(logm, outer_iteration_count, N_power);
+        const location_t global_address = poly_address(thread, N_power);
 
-        // extern __shared__ COMPLEX<T> shared_memory[];
-        extern __shared__ char shared_memory_typed[];
-        COMPLEX<T>* shared_memory =
-            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
-
-        int t_2 = N_power - logm - 1;
-        location_t offset = 1 << (N_power - logm - 1);
-        int t_ = shared_index;
-        int loops = outer_iteration_count;
-
-        location_t global_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (2 * block_y * offset) +
-            (location_t) (block_z << N_power);
-        location_t omega_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (block_y * offset);
-        location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
-
-        // Load data from global & store to shared
-        shared_memory[shared_addresss] = polynomial[global_addresss];
-        shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-            polynomial[global_addresss + offset];
-
-        int t = 1 << t_;
-        int in_shared_address =
-            ((shared_addresss >> t_) << t_) + shared_addresss;
-
-        if (not_last_kernel)
-        {
-#pragma unroll
-            for (int lp = 0; lp < loops; lp++)
-            {
-                //__syncthreads();
-
-                CooleyTukeyUnit(shared_memory[in_shared_address],
-                                shared_memory[in_shared_address + t],
-                                root_of_unity_table[(omega_addresss >> t_2)]);
-
-                t = t >> 1;
-                t_2 -= 1;
-                t_ -= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncthreads();
-            }
-            //__syncthreads();
-        }
-        else
-        {
-#pragma unroll
-            for (int lp = 0; lp < 3; lp++)
-            {
-                //__syncthreads();
-
-                CooleyTukeyUnit(shared_memory[in_shared_address],
-                                shared_memory[in_shared_address + t],
-                                root_of_unity_table[(omega_addresss >> t_2)]);
-
-                t = t >> 1;
-                t_2 -= 1;
-                t_ -= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncthreads();
-            }
-            //__syncthreads();
-
-#pragma unroll
-            for (int lp = 0; lp < 6; lp++)
-            {
-                CooleyTukeyUnit(shared_memory[in_shared_address],
-                                shared_memory[in_shared_address + t],
-                                root_of_unity_table[(omega_addresss >> t_2)]);
-
-                t = t >> 1;
-                t_2 -= 1;
-                t_ -= 1;
-
-                in_shared_address =
-                    ((shared_addresss >> t_) << t_) + shared_addresss;
-                __syncwarp();
-            }
-            __syncthreads();
-        }
-
-        polynomial[global_addresss] = shared_memory[shared_addresss];
-        polynomial[global_addresss + offset] =
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
+        StageLoad(thread, shared_memory, polynomial, global_address);
+        DecreasingStageExecute<CooleyTukey>(
+            thread, shared_memory, root_of_unity_table,
+            CyclicRoots<false>{N_power - logm - 1}, shared_index,
+            outer_iteration_count, not_last_kernel, 3);
+        StageStore(thread, shared_memory, polynomial, global_address);
     }
 
     template <typename T>
@@ -1259,82 +537,21 @@ namespace gpufft
         int shared_index, int logm, int k, int outer_iteration_count,
         int N_power, bool NTT_mult, int offset2)
     {
-        const int idx_x = threadIdx.x;
-        const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
-        const int block_z = blockIdx.z;
-
-        // extern __shared__ COMPLEX<T> shared_memory[];
-        extern __shared__ char shared_memory_typed[];
-        COMPLEX<T>* shared_memory =
-            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
-
-        int t_2 = N_power - logm - 1;
-        location_t offset = 1 << (N_power - k - 1);
-        int t_ = (shared_index + 1) - outer_iteration_count;
-        int loops = outer_iteration_count;
-
-        location_t global_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (2 * block_y * offset) +
-            (location_t) (block_z << N_power);
-        ;
-        location_t omega_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (block_y * offset);
-        location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(k, outer_iteration_count, N_power);
+        const location_t global_address = poly_address(thread, N_power);
 
         if (NTT_mult)
-        {
-            COMPLEX<T> a0 = polynomial[global_addresss];
-            COMPLEX<T> a1 = polynomial[global_addresss + offset];
-
-            COMPLEX<T> b0 = polynomial[global_addresss + offset2];
-            COMPLEX<T> b1 = polynomial[global_addresss + offset + offset2];
-
-            shared_memory[shared_addresss] = a0 * b0;
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-                a1 * b1;
-        }
+            StageLoadProduct(thread, shared_memory, polynomial, global_address,
+                             offset2);
         else
-        {
-            shared_memory[shared_addresss] = polynomial[global_addresss];
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-                polynomial[global_addresss + offset];
-        }
-
-        int t = 1 << t_;
-        int in_shared_address =
-            ((shared_addresss >> t_) << t_) + shared_addresss;
-
-#pragma unroll
-        for (int lp = 0; lp < loops; lp++)
-        {
-            __syncthreads();
-            GentlemanSandeUnit(
-                shared_memory[in_shared_address],
-                shared_memory[in_shared_address + t],
-                inverse_root_of_unity_table[(omega_addresss >> t_2)]);
-
-            t = t << 1;
-            t_2 += 1;
-            t_ += 1;
-
-            in_shared_address =
-                ((shared_addresss >> t_) << t_) + shared_addresss;
-        }
-        __syncthreads();
-
-        polynomial[global_addresss] = shared_memory[shared_addresss];
-        polynomial[global_addresss + offset] =
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)];
+            StageLoad(thread, shared_memory, polynomial, global_address);
+        IncreasingStageExecute<GentlemanSande>(
+            thread, shared_memory, inverse_root_of_unity_table,
+            CyclicRoots<true>{N_power - logm - 1},
+            (shared_index + 1) - outer_iteration_count, outer_iteration_count);
+        StageStore(thread, shared_memory, polynomial, global_address);
     }
 
     template <typename T>
@@ -1343,86 +560,19 @@ namespace gpufft
         COMPLEX<T>* inverse_root_of_unity_table, int shared_index, int logm,
         int k, int outer_iteration_count, int N_power, COMPLEX<T> n_inverse)
     {
-        const int idx_x = threadIdx.x;
-        const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
-        const int block_z = blockIdx.z;
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(k, outer_iteration_count, N_power);
 
-        // extern __shared__ COMPLEX<T> shared_memory[];
-        extern __shared__ char shared_memory_typed[];
-        COMPLEX<T>* shared_memory =
-            reinterpret_cast<COMPLEX<T>*>(shared_memory_typed);
-
-        int t_2 = N_power - logm - 1;
-        location_t offset = 1 << (N_power - k - 1);
-        int t_ = (shared_index + 1) - outer_iteration_count;
-        int loops = outer_iteration_count;
-
-        location_t global_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (2 * block_y * offset);
-
-        location_t global_addresss_in =
-            global_addresss + (location_t) (block_z << (N_power));
-        location_t global_addresss_out =
-            global_addresss + (location_t) (block_z << (N_power + 1));
-
-        location_t omega_addresss =
-            idx_x +
-            (location_t) (idx_y *
-                          (offset / (1 << (outer_iteration_count - 1)))) +
-            (location_t) (blockDim.x * block_x) +
-            (location_t) (block_y * offset);
-        location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
-
-        shared_memory[shared_addresss] = polynomial_in[global_addresss_in];
-        shared_memory[shared_addresss + (blockDim.x * blockDim.y)] =
-            polynomial_in[global_addresss_in + offset];
-
-        int t = 1 << t_;
-        int in_shared_address =
-            ((shared_addresss >> t_) << t_) + shared_addresss;
-
-#pragma unroll
-        for (int lp = 0; lp < loops; lp++)
-        {
-            __syncthreads();
-            GentlemanSandeUnit(
-                shared_memory[in_shared_address],
-                shared_memory[in_shared_address + t],
-                inverse_root_of_unity_table[(omega_addresss >> t_2)]);
-
-            t = t << 1;
-            t_2 += 1;
-            t_ += 1;
-
-            in_shared_address =
-                ((shared_addresss >> t_) << t_) + shared_addresss;
-        }
-        __syncthreads();
-
-        COMPLEX<T> part1 = shared_memory[shared_addresss] * n_inverse;
-        COMPLEX<T> part2 =
-            shared_memory[shared_addresss + (blockDim.x * blockDim.y)] *
-            n_inverse;
-
-        COMPLEX<T> untwist_part1 = untwist_table[global_addresss];
-        part1 = part1 * untwist_part1; // untwist
-
-        COMPLEX<T> untwist_part2 = untwist_table[global_addresss + offset];
-        part2 = part2 * untwist_part2; // untwist
-
-        // unfold
-        polynomial_out[global_addresss_out] = part1.real();
-        polynomial_out[global_addresss_out + (1 << N_power)] = part1.imag();
-
-        polynomial_out[global_addresss_out + offset] = part2.real();
-        polynomial_out[global_addresss_out + (1 << N_power) + offset] =
-            part2.imag();
+        StageLoad(thread, shared_memory, polynomial_in,
+                  poly_address(thread, N_power));
+        IncreasingStageExecute<GentlemanSande>(
+            thread, shared_memory, inverse_root_of_unity_table,
+            CyclicRoots<true>{N_power - logm - 1},
+            (shared_index + 1) - outer_iteration_count, outer_iteration_count);
+        StageStoreUntwistUnfold(thread, shared_memory, polynomial_out,
+                                poly_address(thread, N_power + 1),
+                                untwist_table, n_inverse, N_power);
     }
 
     template <typename T>

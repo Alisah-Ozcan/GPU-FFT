@@ -12,6 +12,7 @@ set(LIB_HEADER_FILES
     include/gpufft/common_fft.cuh
     include/gpufft/complex.cuh
     include/gpufft/fft.cuh
+    include/gpufft/fft_device.cuh
     include/gpufft/fft_cpu.cuh
 )
 
