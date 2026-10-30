@@ -17,10 +17,7 @@ FetchContent_MakeAvailable(nvbench)
 file(REMOVE "${CMAKE_SOURCE_DIR}/compile_commands.json")
 
 set(EXECUTABLES
-    gpu_fft_benchmark bench_gpu_fft.cu
-    gpu_fft_C_C_mult_benchmark bench_gpu_fft_C_C_mult.cu
-    gpu_fft_R_R_mult_benchmark bench_gpu_fft_R_R_mult.cu
-    gpu_ffnt_R_R_mult_benchmark bench_gpu_ffnt_R_R_mult.cu
+    benchmark_fft bench_fft.cu
 )
 
 function(add_benchmark exe source)
