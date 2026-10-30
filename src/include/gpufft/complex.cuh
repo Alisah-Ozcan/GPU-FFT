@@ -41,8 +41,8 @@ namespace complex_arithmetic
         }
 
         // Constructor to initialize the complex number
-        template <typename T2>
-        __host__ __device__ __forceinline__ ComplexOperations(T2 r, T2 i)
+        template <typename T2, typename T3>
+        __host__ __device__ __forceinline__ ComplexOperations(T2 r, T3 i)
         {
             data.x = static_cast<T1>(r);
             data.y = static_cast<T1>(i);
