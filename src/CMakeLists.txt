@@ -4,7 +4,6 @@
 # Developer: Alişah Özcan
 
 set(LIB_SOURCE_FILES
-    lib/common_fft.cu
     lib/fft.cu
     lib/fft_cpu.cu
 )

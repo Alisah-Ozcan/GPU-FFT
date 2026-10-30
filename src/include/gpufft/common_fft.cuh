@@ -8,7 +8,6 @@
 
 #include <cuda_runtime.h>
 
-#include <cassert>
 #include <exception>
 #include <iostream>
 #include <string>
@@ -47,8 +46,6 @@ namespace gpufft
             throw CudaException(__FILE__, __LINE__, error);                    \
         }                                                                      \
     } while (0)
-
-    void customAssert(bool condition, const std::string& errorMessage);
 
     enum ReductionPolynomial
     {
