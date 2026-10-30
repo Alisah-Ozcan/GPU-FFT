@@ -17,8 +17,7 @@ namespace gpufft
         {
             throw std::invalid_argument("Invalid batch_size!");
         }
-        if ((static_cast<long long>(batch_size) << n_power) >=
-            (1LL << 31))
+        if ((static_cast<long long>(batch_size) << n_power) >= (1LL << 31))
         {
             throw std::invalid_argument(
                 "batch_size * ring size must be less than 2^31!");
@@ -545,17 +544,22 @@ namespace gpufft
 
         check_batch_size(cfg.n_power, batch_size);
 
-        auto kernel_parameters = (cfg.fft_type == FORWARD)
-                                     ? CreateForwardFFTKernel<T>()
-                                     : CreateInverseFFTKernel<T>();
+        static const auto forward_kernel_parameters =
+            CreateForwardFFTKernel<T>();
+        static const auto inverse_kernel_parameters =
+            CreateInverseFFTKernel<T>();
+        const auto& kernel_parameters = (cfg.fft_type == FORWARD)
+                                            ? forward_kernel_parameters
+                                            : inverse_kernel_parameters;
 
         switch (cfg.fft_type)
         {
             case FORWARD:
-                for (int i = 0; i < kernel_parameters[cfg.n_power].size(); i++)
+                for (int i = 0; i < kernel_parameters.at(cfg.n_power).size();
+                     i++)
                 {
                     auto& current_kernel_params =
-                        kernel_parameters[cfg.n_power][i];
+                        kernel_parameters.at(cfg.n_power)[i];
                     ForwardCore<<<
                         dim3(current_kernel_params.griddim_x,
                              current_kernel_params.griddim_y, batch_size),
@@ -574,7 +578,8 @@ namespace gpufft
                 break;
             case INVERSE:
             {
-                auto& current_kernel_params = kernel_parameters[cfg.n_power][0];
+                auto& current_kernel_params =
+                    kernel_parameters.at(cfg.n_power)[0];
                 InverseCore<<<dim3(current_kernel_params.griddim_x,
                                    current_kernel_params.griddim_y, batch_size),
                               dim3(current_kernel_params.blockdim_x,
@@ -590,10 +595,11 @@ namespace gpufft
                     (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
                 GPUFFT_CUDA_CHECK(cudaGetLastError());
 
-                for (int i = 1; i < kernel_parameters[cfg.n_power].size(); i++)
+                for (int i = 1; i < kernel_parameters.at(cfg.n_power).size();
+                     i++)
                 {
                     auto& current_kernel_params =
-                        kernel_parameters[cfg.n_power][i];
+                        kernel_parameters.at(cfg.n_power)[i];
                     InverseCore<<<
                         dim3(current_kernel_params.griddim_x,
                              current_kernel_params.griddim_y, batch_size),
@@ -631,15 +637,20 @@ namespace gpufft
 
         check_batch_size(cfg.n_power, batch_size);
 
-        auto kernel_parameters = (cfg.fft_type == FORWARD)
-                                     ? CreateForwardFFTKernel<T>()
-                                     : CreateInverseFFTKernel<T>();
+        static const auto forward_kernel_parameters =
+            CreateForwardFFTKernel<T>();
+        static const auto inverse_kernel_parameters =
+            CreateInverseFFTKernel<T>();
+        const auto& kernel_parameters = (cfg.fft_type == FORWARD)
+                                            ? forward_kernel_parameters
+                                            : inverse_kernel_parameters;
 
         switch (cfg.fft_type)
         {
             case FORWARD:
             {
-                auto& current_kernel_params = kernel_parameters[cfg.n_power][0];
+                auto& current_kernel_params =
+                    kernel_parameters.at(cfg.n_power)[0];
                 ForwardCore<<<dim3(current_kernel_params.griddim_x,
                                    current_kernel_params.griddim_y, batch_size),
                               dim3(current_kernel_params.blockdim_x,
@@ -654,10 +665,11 @@ namespace gpufft
                     (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
                 GPUFFT_CUDA_CHECK(cudaGetLastError());
 
-                for (int i = 1; i < kernel_parameters[cfg.n_power].size(); i++)
+                for (int i = 1; i < kernel_parameters.at(cfg.n_power).size();
+                     i++)
                 {
                     auto& current_kernel_params =
-                        kernel_parameters[cfg.n_power][i];
+                        kernel_parameters.at(cfg.n_power)[i];
                     ForwardCore<<<
                         dim3(current_kernel_params.griddim_x,
                              current_kernel_params.griddim_y, batch_size),
@@ -677,7 +689,8 @@ namespace gpufft
             break;
             case INVERSE:
             {
-                auto& current_kernel_params = kernel_parameters[cfg.n_power][0];
+                auto& current_kernel_params =
+                    kernel_parameters.at(cfg.n_power)[0];
                 InverseCore<<<dim3(current_kernel_params.griddim_x,
                                    current_kernel_params.griddim_y, batch_size),
                               dim3(current_kernel_params.blockdim_x,
@@ -693,12 +706,13 @@ namespace gpufft
                     (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
                 GPUFFT_CUDA_CHECK(cudaGetLastError());
 
-                for (int i = 1; i < kernel_parameters[cfg.n_power].size(); i++)
+                for (int i = 1; i < kernel_parameters.at(cfg.n_power).size();
+                     i++)
                 {
-                    if (i == (kernel_parameters[cfg.n_power].size() - 1))
+                    if (i == (kernel_parameters.at(cfg.n_power).size() - 1))
                     {
                         auto& current_kernel_params =
-                            kernel_parameters[cfg.n_power][i];
+                            kernel_parameters.at(cfg.n_power)[i];
                         InverseCore<<<
                             dim3(current_kernel_params.griddim_x,
                                  current_kernel_params.griddim_y, batch_size),
@@ -720,7 +734,7 @@ namespace gpufft
                     else
                     {
                         auto& current_kernel_params =
-                            kernel_parameters[cfg.n_power][i];
+                            kernel_parameters.at(cfg.n_power)[i];
                         InverseCore<<<
                             dim3(current_kernel_params.griddim_x,
                                  current_kernel_params.griddim_y, batch_size),
@@ -961,17 +975,22 @@ namespace gpufft
 
         check_batch_size(cfg.n_power, batch_size);
 
-        auto kernel_parameters = (cfg.fft_type == FORWARD)
-                                     ? CreateForwardSpecialFFTKernel<T>()
-                                     : CreateInverseSpecialFFTKernel<T>();
+        static const auto forward_kernel_parameters =
+            CreateForwardSpecialFFTKernel<T>();
+        static const auto inverse_kernel_parameters =
+            CreateInverseSpecialFFTKernel<T>();
+        const auto& kernel_parameters = (cfg.fft_type == FORWARD)
+                                            ? forward_kernel_parameters
+                                            : inverse_kernel_parameters;
 
         switch (cfg.fft_type)
         {
             case FORWARD:
-                for (int i = 0; i < kernel_parameters[cfg.n_power].size(); i++)
+                for (int i = 0; i < kernel_parameters.at(cfg.n_power).size();
+                     i++)
                 {
                     auto& current_kernel_params =
-                        kernel_parameters[cfg.n_power][i];
+                        kernel_parameters.at(cfg.n_power)[i];
                     Special_ForwardCore<<<
                         dim3(current_kernel_params.griddim_x,
                              current_kernel_params.griddim_y, batch_size),
@@ -989,11 +1008,11 @@ namespace gpufft
                 break;
             case INVERSE:
             {
-                for (int i = 0; i < kernel_parameters[cfg.n_power].size() - 1;
-                     i++)
+                for (int i = 0;
+                     i < kernel_parameters.at(cfg.n_power).size() - 1; i++)
                 {
                     auto& current_kernel_params =
-                        kernel_parameters[cfg.n_power][i];
+                        kernel_parameters.at(cfg.n_power)[i];
                     Special_InverseCore<<<
                         dim3(current_kernel_params.griddim_x,
                              current_kernel_params.griddim_y, batch_size),
@@ -1008,10 +1027,8 @@ namespace gpufft
                     GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
 
-                auto& current_kernel_params =
-                    kernel_parameters[cfg.n_power]
-                                     [kernel_parameters[cfg.n_power].size() -
-                                      1];
+                auto& current_kernel_params = kernel_parameters.at(
+                    cfg.n_power)[kernel_parameters.at(cfg.n_power).size() - 1];
                 Special_InverseCore<<<
                     dim3(current_kernel_params.griddim_x,
                          current_kernel_params.griddim_y, batch_size),
@@ -1081,8 +1098,7 @@ namespace gpufft
         location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
 
         T real_part1 = polynomial_in[global_addresss_in];
-        T imaginary_part1 =
-            polynomial_in[global_addresss_in + (1 << N_power)];
+        T imaginary_part1 = polynomial_in[global_addresss_in + (1 << N_power)];
         COMPLEX<T> part1(real_part1, imaginary_part1); // fold
         COMPLEX<T> twist_part1 = twist_table[global_addresss];
         part1 = part1 * twist_part1; // twist
@@ -1423,15 +1439,20 @@ namespace gpufft
 
         check_batch_size(cfg.n_power, batch_size);
 
-        auto kernel_parameters = (cfg.fft_type == FORWARD)
-                                     ? CreateForwardFFNTKernel<T>()
-                                     : CreateInverseFFNTKernel<T>();
+        static const auto forward_kernel_parameters =
+            CreateForwardFFNTKernel<T>();
+        static const auto inverse_kernel_parameters =
+            CreateInverseFFNTKernel<T>();
+        const auto& kernel_parameters = (cfg.fft_type == FORWARD)
+                                            ? forward_kernel_parameters
+                                            : inverse_kernel_parameters;
 
         switch (cfg.fft_type)
         {
             case FORWARD:
             {
-                auto& current_kernel_params = kernel_parameters[cfg.n_power][0];
+                auto& current_kernel_params =
+                    kernel_parameters.at(cfg.n_power)[0];
                 ForwardFFNTCoreUnique<<<
                     dim3(current_kernel_params.griddim_x,
                          current_kernel_params.griddim_y, batch_size),
@@ -1445,11 +1466,11 @@ namespace gpufft
                     cfg.n_power - 1);
                 GPUFFT_CUDA_CHECK(cudaGetLastError());
 
-                for (int i = 1; i < kernel_parameters[cfg.n_power].size() - 1;
-                     i++)
+                for (int i = 1;
+                     i < kernel_parameters.at(cfg.n_power).size() - 1; i++)
                 {
                     auto& current_kernel_params =
-                        kernel_parameters[cfg.n_power][i];
+                        kernel_parameters.at(cfg.n_power)[i];
                     ForwardFFNTCoreRegular<<<
                         dim3(current_kernel_params.griddim_x,
                              current_kernel_params.griddim_y, batch_size),
@@ -1464,10 +1485,8 @@ namespace gpufft
                     GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
 
-                auto& last_kernel_params =
-                    kernel_parameters[cfg.n_power]
-                                     [kernel_parameters[cfg.n_power].size() -
-                                      1];
+                auto& last_kernel_params = kernel_parameters.at(
+                    cfg.n_power)[kernel_parameters.at(cfg.n_power).size() - 1];
                 ForwardFFNTCoreRegular<<<
                     dim3(last_kernel_params.griddim_x,
                          last_kernel_params.griddim_y, batch_size),
@@ -1475,16 +1494,16 @@ namespace gpufft
                          last_kernel_params.blockdim_y),
                     last_kernel_params.shared_memory, cfg.stream>>>(
                     device_temp, root_of_unity_table,
-                    last_kernel_params.shared_index,
-                    last_kernel_params.logm,
-                    last_kernel_params.outer_iteration_count,
-                    cfg.n_power - 1, false, false);
+                    last_kernel_params.shared_index, last_kernel_params.logm,
+                    last_kernel_params.outer_iteration_count, cfg.n_power - 1,
+                    false, false);
                 GPUFFT_CUDA_CHECK(cudaGetLastError());
             }
             break;
             case INVERSE:
             {
-                auto& current_kernel_params = kernel_parameters[cfg.n_power][0];
+                auto& current_kernel_params =
+                    kernel_parameters.at(cfg.n_power)[0];
                 InverseFFNTCoreRegular<<<
                     dim3(current_kernel_params.griddim_x,
                          current_kernel_params.griddim_y, batch_size),
@@ -1499,11 +1518,11 @@ namespace gpufft
                     (batch_size << (cfg.n_power - 1)));
                 GPUFFT_CUDA_CHECK(cudaGetLastError());
 
-                for (int i = 1; i < kernel_parameters[cfg.n_power].size() - 1;
-                     i++)
+                for (int i = 1;
+                     i < kernel_parameters.at(cfg.n_power).size() - 1; i++)
                 {
                     auto& current_kernel_params =
-                        kernel_parameters[cfg.n_power][i];
+                        kernel_parameters.at(cfg.n_power)[i];
                     InverseFFNTCoreRegular<<<
                         dim3(current_kernel_params.griddim_x,
                              current_kernel_params.griddim_y, batch_size),
@@ -1519,10 +1538,8 @@ namespace gpufft
                     GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
 
-                auto& last_kernel_params =
-                    kernel_parameters[cfg.n_power]
-                                     [kernel_parameters[cfg.n_power].size() -
-                                      1];
+                auto& last_kernel_params = kernel_parameters.at(
+                    cfg.n_power)[kernel_parameters.at(cfg.n_power).size() - 1];
                 InverseFFNTCoreUnique<<<
                     dim3(last_kernel_params.griddim_x,
                          last_kernel_params.griddim_y, batch_size),
@@ -1530,10 +1547,10 @@ namespace gpufft
                          last_kernel_params.blockdim_y),
                     last_kernel_params.shared_memory, cfg.stream>>>(
                     device_temp, device_inout, twist_table, root_of_unity_table,
-                    last_kernel_params.shared_index,
-                    last_kernel_params.logm, last_kernel_params.k,
-                    last_kernel_params.outer_iteration_count,
-                    cfg.n_power - 1, cfg.mod_inverse);
+                    last_kernel_params.shared_index, last_kernel_params.logm,
+                    last_kernel_params.k,
+                    last_kernel_params.outer_iteration_count, cfg.n_power - 1,
+                    cfg.mod_inverse);
                 GPUFFT_CUDA_CHECK(cudaGetLastError());
             }
             break;
