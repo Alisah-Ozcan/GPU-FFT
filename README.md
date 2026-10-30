@@ -118,6 +118,8 @@ set_target_properties(<your-target> PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 # ...
 ```
 
+All GPU-FFT types and functions are in the `gpufft` namespace. For compatibility, the complex types (`COMPLEX`, `Complex32`, `Complex64`, `Float32`, `Float64`, ...) and `complex_arithmetic` are also available in the global namespace; define `GPUFFT_NO_GLOBAL_ALIASES` to disable them.
+
 ## How to Cite GPU-FFT
 
 Please use the below BibTeX, to cite GPU-FFT in academic papers.
