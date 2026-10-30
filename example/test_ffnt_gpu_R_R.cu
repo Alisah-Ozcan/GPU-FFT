@@ -94,12 +94,12 @@ int main(int argc, char* argv[])
     FFNT<TestDataType> fft_generator(n);
 
     COMPLEX<TestDataType>* Temp_Datas;
-    GPUFFT_CUDA_CHECK(cudaMalloc(&Temp_Datas, 2 * batch * (n >> 1) *
-                                                  sizeof(COMPLEX<TestDataType>)));
+    GPUFFT_CUDA_CHECK(cudaMalloc(
+        &Temp_Datas, 2 * batch * (n >> 1) * sizeof(COMPLEX<TestDataType>)));
 
     TestDataType* Forward_InOut_Datas;
-    GPUFFT_CUDA_CHECK(cudaMalloc(&Forward_InOut_Datas,
-                                 2 * batch * n * sizeof(TestDataType)));
+    GPUFFT_CUDA_CHECK(
+        cudaMalloc(&Forward_InOut_Datas, 2 * batch * n * sizeof(TestDataType)));
 
     GPUFFT_CUDA_CHECK(cudaMemcpy(Forward_InOut_Datas, poly_f.data(),
                                  2 * batch * n * sizeof(TestDataType),
