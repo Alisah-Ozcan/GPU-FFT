@@ -105,26 +105,23 @@ namespace gpufft
         GenerateInverseRootTable();
     }
 
+    // The roots are computed in double precision for both data types.
     template <typename T> void FFT<T>::GenerateRootTable()
     {
-        COMPLEX<T> j(0.0, 1.0); // Define the complex unit (imaginary part)
-
         for (int i = 0; i < n; i++)
         {
-            COMPLEX<T> element = complex_arithmetic::exp(j * COMPLEX<T>(i) *
-                                                         root); // it was float
-            root_tables.push_back(element);
+            double angle = 2.0 * M_PI * i / max_size;
+            root_tables.push_back(COMPLEX<T>(std::cos(angle), std::sin(angle)));
         }
     }
 
     template <typename T> void FFT<T>::GenerateInverseRootTable()
     {
-        COMPLEX<T> one(1.0); // Define the complex unit (imaginary part)
-
         for (int i = 0; i < n; i++)
         {
-            COMPLEX<T> element = one / root_tables[i];
-            inverse_root_tables.push_back(element);
+            double angle = 2.0 * M_PI * i / max_size;
+            inverse_root_tables.push_back(
+                COMPLEX<T>(std::cos(angle), -std::sin(angle)));
         }
     }
 
@@ -248,53 +245,44 @@ namespace gpufft
         GenerateInverseRootTableTwist();
     }
 
+    // The roots are computed in double precision for both data types.
     template <typename T> void FFNT<T>::GenerateRootTable()
     {
-        COMPLEX<T> j(0.0, 1.0); // Define the complex unit (imaginary part)
-
-        T root_new = 2.0 * M_PI / static_cast<T>(n >> 1);
-
         for (int i = 0; i < (n >> 1); i++)
         {
-            COMPLEX<T> element = complex_arithmetic::exp(j * COMPLEX<T>(i) *
-                                                         COMPLEX<T>(root_new));
-            root_tables_new.push_back(element);
+            double angle = 2.0 * M_PI * i / (n >> 1);
+            root_tables_new.push_back(
+                COMPLEX<T>(std::cos(angle), std::sin(angle)));
         }
     }
 
     template <typename T> void FFNT<T>::GenerateInverseRootTable()
     {
-        COMPLEX<T> one(1.0); // Define the complex unit (imaginary part)
-
         for (int i = 0; i < (n >> 1); i++)
         {
-            COMPLEX<T> element = one / root_tables_new[i];
-            inverse_root_tables_new.push_back(element);
+            double angle = 2.0 * M_PI * i / (n >> 1);
+            inverse_root_tables_new.push_back(
+                COMPLEX<T>(std::cos(angle), -std::sin(angle)));
         }
     }
 
     template <typename T> void FFNT<T>::GenerateRootTableTwist()
     {
-        COMPLEX<T> j(0.0, 1.0); // Define the complex unit (imaginary part)
-
-        T root_new = 2.0 * M_PI / static_cast<T>(2 * n);
-
         for (int i = 0; i < (n >> 1); i++)
         {
-            COMPLEX<T> element = complex_arithmetic::exp(j * COMPLEX<T>(i) *
-                                                         COMPLEX<T>(root_new));
-            root_tables_twist.push_back(element);
+            double angle = 2.0 * M_PI * i / (2.0 * n);
+            root_tables_twist.push_back(
+                COMPLEX<T>(std::cos(angle), std::sin(angle)));
         }
     }
 
     template <typename T> void FFNT<T>::GenerateInverseRootTableTwist()
     {
-        COMPLEX<T> one(1.0); // Define the complex unit (imaginary part)
-
         for (int i = 0; i < (n >> 1); i++)
         {
-            COMPLEX<T> element = one / root_tables_twist[i];
-            inverse_root_tables_twist.push_back(element);
+            double angle = 2.0 * M_PI * i / (2.0 * n);
+            inverse_root_tables_twist.push_back(
+                COMPLEX<T>(std::cos(angle), -std::sin(angle)));
         }
     }
 
