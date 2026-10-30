@@ -13,6 +13,8 @@ FetchContent_Declare(
     GIT_SHALLOW    OFF          
 )
 FetchContent_MakeAvailable(nvbench)
+# nvbench links compile_commands.json into the top-level source directory.
+file(REMOVE "${CMAKE_SOURCE_DIR}/compile_commands.json")
 
 set(EXECUTABLES
     gpu_fft_benchmark bench_gpu_fft.cu
