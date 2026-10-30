@@ -89,21 +89,37 @@ ctest --test-dir build --output-on-failure
 
 #### Benchmarks
 
-Choose one of data type which is upper line of the benchmark files:
-- typedef Float32 BenchmarkDataType;
-- typedef Float64 BenchmarkDataType;
+Benchmarks use [nvbench](https://github.com/NVIDIA/nvbench), which requires CMake >= 3.30.4. `benchmark_fft` runs every benchmark for both 32-bit and 64-bit data, with one polynomial (`single`) or about 2^22 values (`bulk`; one polynomial from `LogN` 22):
+- `fft`: `GPU_FFT` for `LogN` 12–24, forward and inverse, X^N-1 and X^N+1, complex or real input/output.
+- `special_fft`: `GPU_Special_FFT` for `LogN` 11–24 (the number of slots).
+- `ffnt`: `GPU_FFNT` for `LogN` 12–24 (the number of real coefficients).
+- `poly_mult`: polynomial multiplication, the forward transform of both operands and the inverse transform with the fused pointwise product, with `GPU_FFT` (`c2c`, `real`) or `GPU_FFNT` (`ffnt`).
 
-To run benchmarks:
+Configure + build:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=86 -DGPUFFT_BUILD_BENCHMARKS=ON
 cmake --build build --parallel
-
-./build/bin/benchmark/gpu_fft_C_C_mult_benchmark --disable-blocking-kernel
-./build/bin/benchmark/gpu_fft_R_R_mult_benchmark --disable-blocking-kernel
-./build/bin/benchmark/gpu_fft_benchmark --disable-blocking-kernel
-./build/bin/benchmark/gpu_ffnt_R_R_mult_benchmark --disable-blocking-kernel
 ```
+
+Run benchmarks:
+
+```bash
+./build/bin/benchmark/benchmark_fft --disable-blocking-kernel
+# Only one benchmark / configuration:
+./build/bin/benchmark/benchmark_fft --disable-blocking-kernel -b fft -a Data=F64 -a LogN=16
+```
+
+Compare two runs (e.g. before and after a change):
+
+```bash
+./build/bin/benchmark/benchmark_fft --disable-blocking-kernel --json before.json
+# ... change and rebuild ...
+./build/bin/benchmark/benchmark_fft --disable-blocking-kernel --json after.json
+python3 benchmark/compare_results.py before.json after.json --threshold 3
+```
+
+`compare_results.py` has no dependencies; it lists the configurations whose GPU time changed by more than the threshold and the measured noise, and exits with status 1 if any configuration got slower. The `single` workload takes only a few microseconds and is dominated by launch latency, so its run-to-run noise is high; use `--skip Workload=single` to compare only the stable workloads.
 
 ## Using GPU-FFT in a downstream CMake project
 
