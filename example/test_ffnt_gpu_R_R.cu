@@ -162,7 +162,6 @@ int main(int argc, char* argv[])
     fft_configuration<TestDataType> cfg_fft{};
     cfg_fft.n_power = logn;
     cfg_fft.fft_type = FORWARD;
-    cfg_fft.zero_padding = false;
     cfg_fft.stream = 0;
 
     GPU_FFNT(Forward_InOut_Datas, Temp_Datas, Twist_Table_Device,
@@ -172,7 +171,6 @@ int main(int argc, char* argv[])
     fft_configuration<TestDataType> cfg_ifft{};
     cfg_ifft.n_power = logn;
     cfg_ifft.fft_type = INVERSE;
-    cfg_ifft.zero_padding = false;
     cfg_ifft.mod_inverse = COMPLEX<TestDataType>(n_inverse_new, 0.0);
     cfg_ifft.stream = 0;
 

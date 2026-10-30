@@ -56,14 +56,12 @@ void GPU_FFT_Poly_Mult_Benchmark(nvbench::state& state)
     cfg_fft.n_power = (static_cast<int>(ring_size_logN) + 1);
     cfg_fft.fft_type = FORWARD;
     cfg_fft.reduction_poly = ReductionPolynomial::X_N_minus;
-    cfg_fft.zero_padding = false;
     cfg_fft.stream = stream;
 
     fft_configuration<BenchmarkDataType> cfg_ifft{};
     cfg_ifft.n_power = (static_cast<int>(ring_size_logN) + 1);
     cfg_ifft.fft_type = INVERSE;
     cfg_ifft.reduction_poly = ReductionPolynomial::X_N_minus;
-    cfg_ifft.zero_padding = false;
     cfg_ifft.mod_inverse = mod_inverse;
     cfg_ifft.stream = stream;
 

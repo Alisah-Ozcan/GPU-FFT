@@ -39,7 +39,6 @@ namespace gpufft
         int n_power;
         type fft_type;
         ReductionPolynomial reduction_poly;
-        bool zero_padding;
         COMPLEX<T> mod_inverse;
         cudaStream_t stream;
     };
@@ -87,8 +86,7 @@ namespace gpufft
     __global__ void
     ForwardCore(COMPLEX<T>* polynomial, COMPLEX<T>* root_of_unity_table,
                 int shared_index, int logm, int outer_iteration_count,
-                int N_power, bool zero_padding, bool not_last_kernel,
-                bool reduction_poly_check);
+                int N_power, bool not_last_kernel, bool reduction_poly_check);
 
     template <typename T>
     __global__ void
@@ -101,8 +99,8 @@ namespace gpufft
     __global__ void
     ForwardCore(T* input, COMPLEX<T>* polynomial,
                 COMPLEX<T>* root_of_unity_table, int shared_index, int logm,
-                int outer_iteration_count, int N_power, bool zero_padding,
-                bool not_last_kernel, bool reduction_poly_check);
+                int outer_iteration_count, int N_power, bool not_last_kernel,
+                bool reduction_poly_check);
 
     template <typename T>
     __global__ void
@@ -243,11 +241,11 @@ namespace gpufft
                           int logm, int outer_iteration_count, int N_power);
 
     template <typename T>
-    __global__ void
-    ForwardFFNTCoreRegular(COMPLEX<T>* polynomial,
-                           COMPLEX<T>* root_of_unity_table, int shared_index,
-                           int logm, int outer_iteration_count, int N_power,
-                           bool zero_padding, bool not_last_kernel);
+    __global__ void ForwardFFNTCoreRegular(COMPLEX<T>* polynomial,
+                                           COMPLEX<T>* root_of_unity_table,
+                                           int shared_index, int logm,
+                                           int outer_iteration_count,
+                                           int N_power, bool not_last_kernel);
 
     template <typename T>
     __global__ void InverseFFNTCoreRegular(

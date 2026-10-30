@@ -161,7 +161,6 @@ int main(int argc, char* argv[])
     cfg_fft.n_power = (logn + 1);
     cfg_fft.fft_type = FORWARD;
     cfg_fft.reduction_poly = ReductionPolynomial::X_N_minus;
-    cfg_fft.zero_padding = false;
     cfg_fft.stream = 0;
 
     GPU_FFT(Forward_InOut_Datas, Root_Table_Device, cfg_fft, batch * 2, false);
@@ -170,7 +169,6 @@ int main(int argc, char* argv[])
     cfg_ifft.n_power = (logn + 1);
     cfg_ifft.fft_type = INVERSE;
     cfg_ifft.reduction_poly = ReductionPolynomial::X_N_minus;
-    cfg_ifft.zero_padding = false;
     cfg_ifft.mod_inverse = COMPLEX<TestDataType>(fft_generator.n_inverse, 0.0);
     cfg_ifft.stream = 0;
 

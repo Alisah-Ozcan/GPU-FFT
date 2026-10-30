@@ -30,8 +30,7 @@ namespace gpufft
     __global__ void
     ForwardCore(COMPLEX<T>* polynomial, COMPLEX<T>* root_of_unity_table,
                 int shared_index, int logm, int outer_iteration_count,
-                int N_power, bool zero_padding, bool not_last_kernel,
-                bool reduction_poly_check)
+                int N_power, bool not_last_kernel, bool reduction_poly_check)
     {
         const int idx_x = threadIdx.x;
         const int idx_y = threadIdx.y;
@@ -279,11 +278,11 @@ namespace gpufft
     }
 
     template <typename T>
-    __global__ void
-    ForwardCore(T* input, COMPLEX<T>* polynomial,
-                COMPLEX<T>* root_of_unity_table, int shared_index, int logm,
-                int outer_iteration_count, int N_power, bool zero_padding,
-                bool not_last_kernel, bool reduction_poly_check)
+    __global__ void ForwardCore(T* input, COMPLEX<T>* polynomial,
+                                COMPLEX<T>* root_of_unity_table,
+                                int shared_index, int logm,
+                                int outer_iteration_count, int N_power,
+                                bool not_last_kernel, bool reduction_poly_check)
     {
         const int idx_x = threadIdx.x;
         const int idx_y = threadIdx.y;
@@ -572,8 +571,7 @@ namespace gpufft
                         current_kernel_params.shared_index,
                         current_kernel_params.logm,
                         current_kernel_params.outer_iteration_count,
-                        cfg.n_power, cfg.zero_padding,
-                        current_kernel_params.not_last_kernel,
+                        cfg.n_power, current_kernel_params.not_last_kernel,
                         (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
                     GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
@@ -663,7 +661,7 @@ namespace gpufft
                     root_of_unity_table, current_kernel_params.shared_index,
                     current_kernel_params.logm,
                     current_kernel_params.outer_iteration_count, cfg.n_power,
-                    cfg.zero_padding, current_kernel_params.not_last_kernel,
+                    current_kernel_params.not_last_kernel,
                     (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
                 GPUFFT_CUDA_CHECK(cudaGetLastError());
 
@@ -682,8 +680,7 @@ namespace gpufft
                         current_kernel_params.shared_index,
                         current_kernel_params.logm,
                         current_kernel_params.outer_iteration_count,
-                        cfg.n_power, cfg.zero_padding,
-                        current_kernel_params.not_last_kernel,
+                        cfg.n_power, current_kernel_params.not_last_kernel,
                         (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
                     GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
@@ -1145,11 +1142,11 @@ namespace gpufft
     }
 
     template <typename T>
-    __global__ void
-    ForwardFFNTCoreRegular(COMPLEX<T>* polynomial,
-                           COMPLEX<T>* root_of_unity_table, int shared_index,
-                           int logm, int outer_iteration_count, int N_power,
-                           bool zero_padding, bool not_last_kernel)
+    __global__ void ForwardFFNTCoreRegular(COMPLEX<T>* polynomial,
+                                           COMPLEX<T>* root_of_unity_table,
+                                           int shared_index, int logm,
+                                           int outer_iteration_count,
+                                           int N_power, bool not_last_kernel)
     {
         const int idx_x = threadIdx.x;
         const int idx_y = threadIdx.y;
@@ -1483,7 +1480,7 @@ namespace gpufft
                         current_kernel_params.shared_index,
                         current_kernel_params.logm,
                         current_kernel_params.outer_iteration_count,
-                        cfg.n_power - 1, false, true);
+                        cfg.n_power - 1, true);
                     GPUFFT_CUDA_CHECK(cudaGetLastError());
                 }
 
@@ -1498,7 +1495,7 @@ namespace gpufft
                     device_temp, root_of_unity_table,
                     last_kernel_params.shared_index, last_kernel_params.logm,
                     last_kernel_params.outer_iteration_count, cfg.n_power - 1,
-                    false, false);
+                    false);
                 GPUFFT_CUDA_CHECK(cudaGetLastError());
             }
             break;
@@ -1569,14 +1566,12 @@ namespace gpufft
     template __global__ void
     ForwardCore(Complex32* polynomial, Complex32* root_of_unity_table,
                 int shared_index, int logm, int outer_iteration_count,
-                int N_power, bool zero_padding, bool not_last_kernel,
-                bool reduction_poly_check);
+                int N_power, bool not_last_kernel, bool reduction_poly_check);
 
     template __global__ void
     ForwardCore(Complex64* polynomial, Complex64* root_of_unity_table,
                 int shared_index, int logm, int outer_iteration_count,
-                int N_power, bool zero_padding, bool not_last_kernel,
-                bool reduction_poly_check);
+                int N_power, bool not_last_kernel, bool reduction_poly_check);
 
     template __global__ void
     InverseCore(Complex32* polynomial, Complex32* inverse_root_of_unity_table,
@@ -1590,17 +1585,19 @@ namespace gpufft
                 int N_power, Complex64 n_inverse, bool last_kernel,
                 bool NTT_mult, int offset2, bool reduction_poly_check);
 
-    template __global__ void
-    ForwardCore(Float32* input, Complex32* polynomial,
-                Complex32* root_of_unity_table, int shared_index, int logm,
-                int outer_iteration_count, int N_power, bool zero_padding,
-                bool not_last_kernel, bool reduction_poly_check);
+    template __global__ void ForwardCore(Float32* input, Complex32* polynomial,
+                                         Complex32* root_of_unity_table,
+                                         int shared_index, int logm,
+                                         int outer_iteration_count, int N_power,
+                                         bool not_last_kernel,
+                                         bool reduction_poly_check);
 
-    template __global__ void
-    ForwardCore(Float64* input, Complex64* polynomial,
-                Complex64* root_of_unity_table, int shared_index, int logm,
-                int outer_iteration_count, int N_power, bool zero_padding,
-                bool not_last_kernel, bool reduction_poly_check);
+    template __global__ void ForwardCore(Float64* input, Complex64* polynomial,
+                                         Complex64* root_of_unity_table,
+                                         int shared_index, int logm,
+                                         int outer_iteration_count, int N_power,
+                                         bool not_last_kernel,
+                                         bool reduction_poly_check);
 
     template __global__ void InverseCore(Float32* output, Complex32* polynomial,
                                          Complex32* inverse_root_of_unity_table,
@@ -1684,17 +1681,13 @@ namespace gpufft
                           Complex64* root_of_unity_table, int shared_index,
                           int logm, int outer_iteration_count, int N_power);
 
-    template __global__ void
-    ForwardFFNTCoreRegular(Complex32* polynomial,
-                           Complex32* root_of_unity_table, int shared_index,
-                           int logm, int outer_iteration_count, int N_power,
-                           bool zero_padding, bool not_last_kernel);
+    template __global__ void ForwardFFNTCoreRegular(
+        Complex32* polynomial, Complex32* root_of_unity_table, int shared_index,
+        int logm, int outer_iteration_count, int N_power, bool not_last_kernel);
 
-    template __global__ void
-    ForwardFFNTCoreRegular(Complex64* polynomial,
-                           Complex64* root_of_unity_table, int shared_index,
-                           int logm, int outer_iteration_count, int N_power,
-                           bool zero_padding, bool not_last_kernel);
+    template __global__ void ForwardFFNTCoreRegular(
+        Complex64* polynomial, Complex64* root_of_unity_table, int shared_index,
+        int logm, int outer_iteration_count, int N_power, bool not_last_kernel);
 
     template __global__ void InverseFFNTCoreRegular(
         Complex32* polynomial, Complex32* inverse_root_of_unity_table,
