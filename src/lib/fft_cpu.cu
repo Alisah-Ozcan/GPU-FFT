@@ -423,9 +423,10 @@ namespace gpufft
             input1_complex[i] =
                 input1_complex[i] * COMPLEX<T>(n_inverse_new); // div
 
-            result[i] = std::round(input1_complex[i].real()); // unfold
-            result[i + (n >> 1)] =
-                std::round(input1_complex[i].imag()); // unfold
+            result[i] = static_cast<unsigned long long>(
+                std::llround(input1_complex[i].real())); // unfold
+            result[i + (n >> 1)] = static_cast<unsigned long long>(
+                std::llround(input1_complex[i].imag())); // unfold
         }
 
         return result;
