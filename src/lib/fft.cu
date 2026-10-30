@@ -1057,15 +1057,15 @@ namespace gpufft
             (location_t) (block_y * offset);
         location_t shared_addresss = (idx_x + (idx_y * blockDim.x));
 
-        double real_part1 = polynomial_in[global_addresss_in];
-        double imaginary_part1 =
+        T real_part1 = polynomial_in[global_addresss_in];
+        T imaginary_part1 =
             polynomial_in[global_addresss_in + (1 << N_power)];
         COMPLEX<T> part1(real_part1, imaginary_part1); // fold
         COMPLEX<T> twist_part1 = twist_table[global_addresss];
         part1 = part1 * twist_part1; // twist
 
-        double real_part2 = polynomial_in[global_addresss_in + offset];
-        double imaginary_part2 =
+        T real_part2 = polynomial_in[global_addresss_in + offset];
+        T imaginary_part2 =
             polynomial_in[global_addresss_in + offset + (1 << N_power)];
         COMPLEX<T> part2(real_part2, imaginary_part2); // fold
         COMPLEX<T> twist_part2 = twist_table[global_addresss + offset];
