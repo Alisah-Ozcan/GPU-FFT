@@ -70,8 +70,8 @@ namespace complex_arithmetic
         }
 
         // Complex addition and equal operator (+=)
-        __host__ __device__ __forceinline__ ComplexOperations
-        operator+=(const ComplexOperations& other) const
+        __host__ __device__ __forceinline__ ComplexOperations&
+        operator+=(const ComplexOperations& other)
         {
             real() += other.real();
             imag() += other.imag();
@@ -88,8 +88,8 @@ namespace complex_arithmetic
 
         // Complex, scalar addition and equal operator (+=)
         template <typename T2>
-        __host__ __device__ __forceinline__ ComplexOperations
-        operator+=(const T2& other) const
+        __host__ __device__ __forceinline__ ComplexOperations&
+        operator+=(const T2& other)
         {
             real() += static_cast<T1>(other);
             return *this;
@@ -104,8 +104,8 @@ namespace complex_arithmetic
         }
 
         // Complex subtraction and equal operator (-=)
-        __host__ __device__ __forceinline__ ComplexOperations
-        operator-=(const ComplexOperations& other) const
+        __host__ __device__ __forceinline__ ComplexOperations&
+        operator-=(const ComplexOperations& other)
         {
             real() -= other.real();
             imag() -= other.imag();
@@ -122,8 +122,8 @@ namespace complex_arithmetic
 
         // Complex, scalar subtraction and equal operator (-=)
         template <typename T2>
-        __host__ __device__ __forceinline__ ComplexOperations
-        operator-=(const T2& other) const
+        __host__ __device__ __forceinline__ ComplexOperations&
+        operator-=(const T2& other)
         {
             real() -= static_cast<T1>(other);
             return *this;
@@ -139,8 +139,8 @@ namespace complex_arithmetic
         }
 
         // Complex multiplication equal operator (*=)
-        __host__ __device__ __forceinline__ ComplexOperations
-        operator*=(const ComplexOperations& other) const
+        __host__ __device__ __forceinline__ ComplexOperations&
+        operator*=(const ComplexOperations& other)
         {
             T1 r = real() * other.real() - imag() * other.imag();
             T1 i = real() * other.imag() + imag() * other.real();
@@ -160,8 +160,8 @@ namespace complex_arithmetic
 
         // Complex, scalar multiplication equal operator (*=)
         template <typename T2>
-        __host__ __device__ __forceinline__ ComplexOperations
-        operator*=(const T2& other) const
+        __host__ __device__ __forceinline__ ComplexOperations&
+        operator*=(const T2& other)
         {
             real() *= static_cast<T1>(other);
             imag() *= static_cast<T1>(other);
@@ -180,8 +180,8 @@ namespace complex_arithmetic
         }
 
         // Complex division operator (/=)
-        __host__ __device__ __forceinline__ ComplexOperations
-        operator/=(const ComplexOperations& other) const
+        __host__ __device__ __forceinline__ ComplexOperations&
+        operator/=(const ComplexOperations& other)
         {
             T1 denominator =
                 other.real() * other.real() + other.imag() * other.imag();
@@ -205,8 +205,8 @@ namespace complex_arithmetic
 
         // Complex, scalar division operator (/=)
         template <typename T2>
-        __host__ __device__ __forceinline__ ComplexOperations
-        operator/=(const T2& other) const
+        __host__ __device__ __forceinline__ ComplexOperations&
+        operator/=(const T2& other)
         {
             real() /= static_cast<T1>(other);
             imag() /= static_cast<T1>(other);
