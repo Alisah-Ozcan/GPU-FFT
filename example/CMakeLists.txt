@@ -11,6 +11,7 @@ set(EXECUTABLES
     gpu_fft_R_R_example test_fft_gpu_R_R.cu
     cpu_ffnt_example test_ffnt_cpu.cu
     gpu_ffnt_R_R_example test_ffnt_gpu_R_R.cu
+    gpu_special_fft_example test_special_fft_gpu.cu
 )
 
 function(add_example exe source)

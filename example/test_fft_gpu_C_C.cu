@@ -1,208 +1,116 @@
-// Copyright 2023-2025 Alişah Özcan
+// Copyright 2023-2026 Alişah Özcan
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 // Developer: Alişah Özcan
 
-#include <cstdlib> // For atoi or atof functions
-#include <iomanip>
-#include <iostream>
+#include <cstdlib>
 #include <random>
 
 #include "gpufft/fft.cuh"
 #include "gpufft/fft_cpu.cuh"
+#include "example_util.cuh"
 
 using namespace std;
 using namespace gpufft;
+using namespace gpufft_example;
 
-int q;
-int logn;
-int batch;
-int n;
-
-// typedef Float32 TestDataType; // Use for 32-bit benchmark
-typedef Float64 TestDataType; // Use for 64-bit benchmark
-
-int main(int argc, char* argv[])
+// Multiplies batch pairs of polynomials with n = 2^logn coefficients: zero
+// padded to 2n complex values, forward FFT of A and B, inverse FFT with the
+// fused pointwise product, checked against the schoolbook product.
+template <typename T> bool run(int logn, int batch)
 {
-    if (argc < 3)
-    {
-        q = 7;
-        logn = 12;
-        batch = 1;
-        n = 1 << logn;
-    }
-    else
-    {
-        q = 7;
-        logn = atoi(argv[1]);
-        batch = atoi(argv[2]);
-        n = 1 << logn;
+    check_logn(logn, 11, 23); // FFT size 2n: n_power 12 to 24
+    const int n = 1 << logn;
 
-        if ((logn < 11) || (23 < logn))
-        {
-            throw std::runtime_error("LOGN should be in range 11 to 23.");
-        }
-    }
+    std::mt19937 gen(0);
+    std::uniform_int_distribution<int> dis(0, coefficient_bound<T>());
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    int minNumber = 0;
-    int maxNumber = q - 1;
-    std::uniform_int_distribution<int> dis(minNumber, maxNumber);
-
-    vector<vector<int>> A_poly(batch, vector<int>(n * 2));
-    vector<vector<int>> B_poly(batch, vector<int>(n * 2));
-
+    vector<vector<int>> A_poly(batch, vector<int>(n));
+    vector<vector<int>> B_poly(batch, vector<int>(n));
+    // A (batch polynomials) followed by B, zero padded
+    vector<COMPLEX<T>> vec_GPU(2 * batch * n * 2, COMPLEX<T>(0.0, 0.0));
     for (int j = 0; j < batch; j++)
     {
         for (int i = 0; i < n; i++)
         {
             A_poly[j][i] = dis(gen);
             B_poly[j][i] = dis(gen);
+            vec_GPU[(j * n * 2) + i] = COMPLEX<T>(A_poly[j][i], 0.0);
+            vec_GPU[((j + batch) * n * 2) + i] = COMPLEX<T>(B_poly[j][i], 0.0);
         }
     }
 
-    // Zero Pad
-    for (int j = 0; j < batch; j++)
-    {
-        for (int i = 0; i < n; i++)
-        {
-            A_poly[j][i + n] = 0;
-            B_poly[j][i + n] = 0;
-        }
-    }
+    FFT<T> fft_generator(n);
 
-    std::vector<std::vector<COMPLEX<TestDataType>>> A_vec(
-        batch, std::vector<COMPLEX<TestDataType>>(n * 2));
-    std::vector<std::vector<COMPLEX<TestDataType>>> B_vec(
-        batch, std::vector<COMPLEX<TestDataType>>(n * 2));
-
-    std::vector<std::vector<COMPLEX<TestDataType>>> vec_GPU(
-        2 * batch,
-        std::vector<COMPLEX<TestDataType>>(n * 2)); // A and B together
-
-    for (int j = 0; j < batch; j++)
-    {
-        for (int i = 0; i < n * 2; i++)
-        {
-            COMPLEX<TestDataType> A_element = A_poly[j][i];
-            A_vec[j][i] = A_element;
-
-            COMPLEX<TestDataType> B_element = B_poly[j][i];
-            B_vec[j][i] = B_element;
-        }
-    }
-
-    for (int j = 0; j < batch; j++)
-    { // LOAD A
-        for (int i = 0; i < n * 2; i++)
-        {
-            COMPLEX<TestDataType> element = A_poly[j][i];
-            vec_GPU[j][i] = element;
-        }
-    }
-
-    for (int j = 0; j < batch; j++)
-    { // LOAD B
-        for (int i = 0; i < n * 2; i++)
-        {
-            COMPLEX<TestDataType> element = B_poly[j][i];
-            vec_GPU[j + batch][i] = element;
-        }
-    }
-
-    FFT<TestDataType> fft_generator(n);
-
-    /////////////////////////////////////////////////////////////////////////
-
-    COMPLEX<TestDataType>* Forward_InOut_Datas;
-
-    GPUFFT_CUDA_CHECK(cudaMalloc(
-        &Forward_InOut_Datas,
-        2 * batch * n * 2 *
-            sizeof(COMPLEX<TestDataType>))); // 2 --> A and B, batch -->
-                                             // batch size, 2 --> zero pad
-
-    for (int j = 0; j < 2 * batch; j++)
-    {
-        GPUFFT_CUDA_CHECK(cudaMemcpy(
-            Forward_InOut_Datas + (n * 2 * j), vec_GPU[j].data(),
-            n * 2 * sizeof(COMPLEX<TestDataType>), cudaMemcpyHostToDevice));
-    }
-    /////////////////////////////////////////////////////////////////////////
-
-    COMPLEX<TestDataType>* Root_Table_Device;
-
+    COMPLEX<T>* InOut_Datas;
     GPUFFT_CUDA_CHECK(
-        cudaMalloc(&Root_Table_Device, n * sizeof(COMPLEX<TestDataType>)));
-
-    vector<COMPLEX<TestDataType>> reverse_table =
-        fft_generator.ReverseRootTable();
-    GPUFFT_CUDA_CHECK(cudaMemcpy(Root_Table_Device, reverse_table.data(),
-                                 n * sizeof(COMPLEX<TestDataType>),
+        cudaMalloc(&InOut_Datas, vec_GPU.size() * sizeof(COMPLEX<T>)));
+    GPUFFT_CUDA_CHECK(cudaMemcpy(InOut_Datas, vec_GPU.data(),
+                                 vec_GPU.size() * sizeof(COMPLEX<T>),
                                  cudaMemcpyHostToDevice));
 
-    /////////////////////////////////////////////////////////////////////////
+    vector<COMPLEX<T>> reverse_table = fft_generator.ReverseRootTable();
+    COMPLEX<T>* Root_Table_Device;
+    GPUFFT_CUDA_CHECK(cudaMalloc(&Root_Table_Device, n * sizeof(COMPLEX<T>)));
+    GPUFFT_CUDA_CHECK(cudaMemcpy(Root_Table_Device, reverse_table.data(),
+                                 n * sizeof(COMPLEX<T>),
+                                 cudaMemcpyHostToDevice));
 
-    COMPLEX<TestDataType>* Inverse_Root_Table_Device;
-
-    GPUFFT_CUDA_CHECK(cudaMalloc(&Inverse_Root_Table_Device,
-                                 n * sizeof(COMPLEX<TestDataType>)));
-
-    vector<COMPLEX<TestDataType>> inverse_reverse_table =
+    vector<COMPLEX<T>> inverse_reverse_table =
         fft_generator.InverseReverseRootTable();
+    COMPLEX<T>* Inverse_Root_Table_Device;
+    GPUFFT_CUDA_CHECK(
+        cudaMalloc(&Inverse_Root_Table_Device, n * sizeof(COMPLEX<T>)));
     GPUFFT_CUDA_CHECK(
         cudaMemcpy(Inverse_Root_Table_Device, inverse_reverse_table.data(),
-                   n * sizeof(COMPLEX<TestDataType>), cudaMemcpyHostToDevice));
+                   n * sizeof(COMPLEX<T>), cudaMemcpyHostToDevice));
 
-    /////////////////////////////////////////////////////////////////////////
-
-    fft_configuration<TestDataType> cfg_fft{};
-    cfg_fft.n_power = (logn + 1);
+    fft_configuration<T> cfg_fft{};
+    cfg_fft.n_power = logn + 1;
     cfg_fft.fft_type = FORWARD;
     cfg_fft.reduction_poly = ReductionPolynomial::X_N_minus;
     cfg_fft.stream = 0;
 
-    GPU_FFT(Forward_InOut_Datas, Root_Table_Device, cfg_fft, batch * 2, false);
+    GPU_FFT(InOut_Datas, Root_Table_Device, cfg_fft, batch * 2, false);
 
-    fft_configuration<TestDataType> cfg_ifft{};
-    cfg_ifft.n_power = (logn + 1);
+    fft_configuration<T> cfg_ifft{};
+    cfg_ifft.n_power = logn + 1;
     cfg_ifft.fft_type = INVERSE;
     cfg_ifft.reduction_poly = ReductionPolynomial::X_N_minus;
-    cfg_ifft.mod_inverse = COMPLEX<TestDataType>(fft_generator.n_inverse, 0.0);
+    cfg_ifft.mod_inverse = COMPLEX<T>(fft_generator.n_inverse, 0.0);
     cfg_ifft.stream = 0;
 
-    GPU_FFT(Forward_InOut_Datas, Inverse_Root_Table_Device, cfg_ifft, batch,
-            true);
+    GPU_FFT(InOut_Datas, Inverse_Root_Table_Device, cfg_ifft, batch, true);
 
-    std::vector<COMPLEX<TestDataType>> test(batch * 2 * n);
-    GPUFFT_CUDA_CHECK(cudaMemcpy(test.data(), Forward_InOut_Datas,
-                                 batch * n * 2 * sizeof(COMPLEX<TestDataType>),
+    vector<COMPLEX<T>> result(batch * n * 2);
+    GPUFFT_CUDA_CHECK(cudaMemcpy(result.data(), InOut_Datas,
+                                 result.size() * sizeof(COMPLEX<T>),
                                  cudaMemcpyDeviceToHost));
 
-    for (int j = 0; j < batch; j++)
+    bool correct = true;
+    for (int j = 0; j < batch && correct; j++)
     {
-        vector<int> test_school =
-            schoolbook_poly_multiplication_without_reduction(A_poly[j],
-                                                             B_poly[j], q, n);
+        vector<T> real(n * 2);
         for (int i = 0; i < n * 2; i++)
-        {
-            signed gpu_result = std::round(test[(j * (n * 2)) + i].real());
-            if (test_school[i] != (gpu_result % q))
-            {
-                throw runtime_error("ERROR");
-            }
-
-            if (i < 10)
-            {
-                cout << test_school[i] << " - " << gpu_result % q << endl;
-            }
-        }
+            real[i] = result[(j * n * 2) + i].real();
+        correct =
+            check_rounded(real, linear_multiplication(A_poly[j], B_poly[j]), j);
     }
+    cout << (correct ? "All Correct for GPU FFT (complex) multiplication."
+                     : "GPU FFT (complex) multiplication failed.")
+         << endl;
 
-    GPUFFT_CUDA_CHECK(cudaFree(Forward_InOut_Datas));
+    GPUFFT_CUDA_CHECK(cudaFree(InOut_Datas));
     GPUFFT_CUDA_CHECK(cudaFree(Root_Table_Device));
     GPUFFT_CUDA_CHECK(cudaFree(Inverse_Root_Table_Device));
+    return correct;
+}
 
-    return EXIT_SUCCESS;
+int main(int argc, char* argv[])
+{
+    const ExampleArgs args = parse_example_args(argc, argv);
+    const bool correct = (args.bits == 32)
+                             ? run<Float32>(args.logn, args.batch)
+                             : run<Float64>(args.logn, args.batch);
+    return correct ? EXIT_SUCCESS : EXIT_FAILURE;
 }

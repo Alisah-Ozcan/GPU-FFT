@@ -1,84 +1,61 @@
-// Copyright 2023-2025 Alişah Özcan
+// Copyright 2023-2026 Alişah Özcan
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 // Developer: Alişah Özcan
 
-#include <cstdlib> // For atoi or atof functions
-#include <iomanip>
-#include <iostream>
+#include <cstdlib>
 #include <random>
 
-#include "gpufft/fft.cuh"
 #include "gpufft/fft_cpu.cuh"
+#include "example_util.cuh"
 
 using namespace std;
 using namespace gpufft;
+using namespace gpufft_example;
 
-unsigned long long q;
-int logn;
-int batch;
-int n;
+// Multiplies batch pairs of polynomials with n = 2^logn coefficients modulo
+// X^n + 1 with the CPU FFNT, checked against the schoolbook product.
+template <typename T> bool run(int logn, int batch)
+{
+    check_logn(logn, 2, 24);
+    const int n = 1 << logn;
 
-// typedef Float32 TestDataType; // Use for 32-bit benchmark
-typedef Float64 TestDataType; // Use for 64-bit benchmark
+    std::mt19937 gen(0);
+    std::uniform_int_distribution<int> dis(0, coefficient_bound<T>());
+
+    FFNT<T> fft_generator(n);
+
+    bool correct = true;
+    for (int j = 0; j < batch && correct; j++)
+    {
+        vector<int> A_poly(n), B_poly(n);
+        vector<unsigned long long> A_input(n), B_input(n);
+        for (int i = 0; i < n; i++)
+        {
+            A_poly[i] = dis(gen);
+            B_poly[i] = dis(gen);
+            A_input[i] = A_poly[i];
+            B_input[i] = B_poly[i];
+        }
+
+        // MULT returns negative coefficients modulo 2^64.
+        vector<unsigned long long> result =
+            fft_generator.MULT(A_input, B_input);
+        vector<long long> signed_result(result.begin(), result.end());
+        correct = check_rounded(signed_result,
+                                negacyclic_multiplication(A_poly, B_poly), j);
+    }
+    cout << (correct ? "All Correct for CPU FFNT multiplication."
+                     : "CPU FFNT multiplication failed.")
+         << endl;
+    return correct;
+}
 
 int main(int argc, char* argv[])
 {
-    if (argc < 3)
-    {
-        q = 7;
-        logn = 12;
-        batch = 1;
-        n = 1 << logn;
-    }
-    else
-    {
-        q = 7;
-        logn = atoi(argv[1]);
-        batch = atoi(argv[2]);
-        n = 1 << logn;
-
-        if ((logn < 12) || (24 < logn))
-        {
-            throw std::runtime_error("LOGN should be in range 12 to 24.");
-        }
-    }
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    // std::mt19937 gen(0);
-    unsigned long long minNumber = 0;
-    unsigned long long maxNumber = q - 1;
-    std::uniform_int_distribution<int> dis(minNumber, maxNumber);
-
-    vector<unsigned long long> A_poly(n);
-    vector<unsigned long long> B_poly(n);
-    for (int i = 0; i < n; i++)
-    {
-        A_poly[i] = dis(gen);
-        B_poly[i] = dis(gen);
-    }
-
-    FFNT<TestDataType> fft_generator(n);
-
-    vector<unsigned long long> result = fft_generator.MULT(A_poly, B_poly);
-
-    vector<unsigned long long> test_school =
-        schoolbook_poly_multiplication(A_poly, B_poly, q, n);
-    for (int i = 0; i < n; i++)
-    {
-        if (test_school[i] != (result[i] % q))
-        {
-            std::cout << i << std::endl;
-            throw runtime_error("ERROR");
-        }
-
-        if (i < 10)
-        {
-            cout << i << ": " << test_school[i] << " - " << result[i] % q
-                 << endl;
-        }
-    }
-
-    return EXIT_SUCCESS;
+    const ExampleArgs args = parse_example_args(argc, argv);
+    const bool correct = (args.bits == 32)
+                             ? run<Float32>(args.logn, args.batch)
+                             : run<Float64>(args.logn, args.batch);
+    return correct ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -56,24 +56,21 @@ cmake --build build --parallel
 
 ### Testing & Benchmarking
 
-#### CPU & GPU FFT Testing & Benchmarking
+#### Examples (CPU & GPU)
 
-Choose one of data type which is upper line of the benchmark files:
-- typedef Float32 BenchmarkDataType;
-- typedef Float64 BenchmarkDataType;
-
-To run examples:
+The examples take the ring size, the batch size and the data type (`32` for `Float32`, `64` for `Float64`) from the command line; the defaults are `12 1 64`. They multiply random polynomials and compare the rounded results with the schoolbook product; `Float32` runs use smaller coefficients so that the products stay exact. The special FFT example compares the forward transform with a CPU implementation and checks that the inverse undoes it.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=86 -DGPUFFT_BUILD_EXAMPLES=ON
 cmake --build build --parallel
 
-./build/bin/example/cpu_fft_example <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-./build/bin/example/gpu_fft_C_C_example <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-./build/bin/example/gpu_fft_R_R_example <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-./build/bin/example/cpu_ffnt_example <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-./build/bin/example/gpu_ffnt_R_R_example <RING_SIZE_IN_LOG2> <BATCH_SIZE>
-Example: ./build/bin/example/gpu_fft_R_R_example 12 1
+./build/bin/example/cpu_fft_example [RING_SIZE_IN_LOG2] [BATCH_SIZE] [32|64]
+./build/bin/example/gpu_fft_C_C_example [RING_SIZE_IN_LOG2] [BATCH_SIZE] [32|64]
+./build/bin/example/gpu_fft_R_R_example [RING_SIZE_IN_LOG2] [BATCH_SIZE] [32|64]
+./build/bin/example/cpu_ffnt_example [RING_SIZE_IN_LOG2] [BATCH_SIZE] [32|64]
+./build/bin/example/gpu_ffnt_R_R_example [RING_SIZE_IN_LOG2] [BATCH_SIZE] [32|64]
+./build/bin/example/gpu_special_fft_example [SLOT_COUNT_IN_LOG2] [BATCH_SIZE] [32|64]
+# Example: ./build/bin/example/gpu_fft_R_R_example 12 1 32
 ```
 
 #### Tests
@@ -89,6 +86,12 @@ ctest --test-dir build --output-on-failure
 - `-DGPUFFT_TEST_MAX_LOGN=<N>` sets the largest size covered by the regular suites (default `20`).
 - The `large` suites cover the sizes above it, up to 2^24, with one polynomial each.
 - A single suite can be run directly: `./build/bin/test/fft_tests --bits 64 --suite special --max-logn 16`
+
+#### Benchmarks
+
+Choose one of data type which is upper line of the benchmark files:
+- typedef Float32 BenchmarkDataType;
+- typedef Float64 BenchmarkDataType;
 
 To run benchmarks:
 
