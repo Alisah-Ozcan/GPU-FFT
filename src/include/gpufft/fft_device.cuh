@@ -17,6 +17,121 @@
 
 namespace gpufft
 {
+    // ---------------- Stage plan ----------------
+
+    // Launch parameters of one stage kernel.
+    struct KernelConfig
+    {
+        int griddim_x;
+        int griddim_y;
+        int blockdim_x;
+        int blockdim_y;
+        size_t shared_memory;
+
+        int shared_index;
+        int logm;
+        int k;
+        int outer_iteration_count;
+
+        // The inverse plans store the last_kernel flag here.
+        bool not_last_kernel;
+    };
+
+    constexpr int kStageThreads = 256;
+
+    constexpr int kMaxStages = 5;
+
+    // The kernels of one transform, in launch order, with the grid axes
+    // flag of each kernel.
+    struct StagePlan
+    {
+        int count;
+        KernelConfig stage[kMaxStages];
+        bool swap_grid_axes[kMaxStages];
+    };
+
+    // The kernels of an FFT of size 2^log_n. Every kernel has threads = 2^s
+    // threads (2^s <= 2^log_n / 2) and each thread keeps two values in
+    // shared memory. The last forward kernel runs s + 1 levels with block
+    // (2^s, 1). The levels before it are split as evenly as possible,
+    // smaller ones first, over as few kernels as possible with at most s - 1
+    // levels each; a kernel with L levels has block (2^(s - L + 1),
+    // 2^(L - 1)), so its rows read at least four adjacent values. A kernel
+    // swaps the grid axes when its 2^logm groups do not fit grid y. The
+    // inverse kernels mirror the forward ones. The Special FFT runs the
+    // inverse plan forward and the forward plan inverse; the FFNT of 2^n
+    // real values runs the plans of 2^(n - 1).
+    template <typename T>
+    constexpr StagePlan stage_plan(type direction, int log_n,
+                                   int threads = kStageThreads)
+    {
+        int s = 0;
+        while ((1 << s) < threads)
+        {
+            s++;
+        }
+
+        StagePlan plan = {};
+        const int early_levels = log_n - (s + 1);
+        const int early_count = (early_levels + s - 2) / (s - 1);
+        plan.count = early_count + 1;
+
+        KernelConfig forward[kMaxStages] = {};
+        bool swap[kMaxStages] = {};
+        int logm = 0;
+        for (int i = 0; i < plan.count; i++)
+        {
+            const bool last = (i == early_count);
+            const int levels =
+                last ? s + 1
+                     : early_levels / early_count +
+                           (i >= early_count - early_levels % early_count);
+            const int block_y = last ? 1 : 1 << (levels - 1);
+            const int block_x = threads / block_y;
+            const long long columns =
+                last ? 1 : (1LL << (log_n - logm - levels)) / block_x;
+            const long long groups = 1LL << logm;
+            swap[i] = groups > 65535;
+            forward[i] = KernelConfig{int(swap[i] ? groups : columns),
+                                      int(swap[i] ? columns : groups),
+                                      block_x,
+                                      block_y,
+                                      size_t(2 * threads) * sizeof(COMPLEX<T>),
+                                      s,
+                                      logm,
+                                      0,
+                                      levels,
+                                      !last};
+            logm += levels;
+        }
+
+        for (int i = 0; i < plan.count; i++)
+        {
+            const int f = (direction == FORWARD) ? i : plan.count - 1 - i;
+            plan.swap_grid_axes[i] = swap[f];
+            if (direction == FORWARD)
+            {
+                plan.stage[i] = forward[f];
+            }
+            else
+            {
+                const KernelConfig& c = forward[f];
+                plan.stage[i] =
+                    KernelConfig{c.griddim_x,
+                                 c.griddim_y,
+                                 c.blockdim_x,
+                                 c.blockdim_y,
+                                 c.shared_memory,
+                                 c.shared_index,
+                                 c.logm + c.outer_iteration_count - 1,
+                                 c.logm,
+                                 c.outer_iteration_count,
+                                 i + 1 == plan.count};
+            }
+        }
+        return plan;
+    }
+
     // Per-thread state of one stage: thread (x, y) owns the shared memory
     // entries shared_address and shared_address + blockDim.x * blockDim.y.
     // In global memory they are at local_address and local_address + offset
