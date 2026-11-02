@@ -62,34 +62,6 @@ namespace gpufft
         V = (u_ - v_) * root;
     }
 
-    template <typename T>
-    __global__ void
-    ForwardCore(COMPLEX<T>* polynomial, COMPLEX<T>* root_of_unity_table,
-                int shared_index, int logm, int outer_iteration_count,
-                int N_power, bool not_last_kernel, bool reduction_poly_check);
-
-    template <typename T>
-    __global__ void
-    InverseCore(COMPLEX<T>* polynomial, COMPLEX<T>* inverse_root_of_unity_table,
-                int shared_index, int logm, int k, int outer_iteration_count,
-                int N_power, COMPLEX<T> n_inverse, bool last_kernel,
-                bool NTT_mult, int offset2, bool reduction_poly_check);
-
-    template <typename T>
-    __global__ void
-    ForwardCore(T* input, COMPLEX<T>* polynomial,
-                COMPLEX<T>* root_of_unity_table, int shared_index, int logm,
-                int outer_iteration_count, int N_power, bool not_last_kernel,
-                bool reduction_poly_check);
-
-    template <typename T>
-    __global__ void
-    InverseCore(T* output, COMPLEX<T>* polynomial,
-                COMPLEX<T>* inverse_root_of_unity_table, int shared_index,
-                int logm, int k, int outer_iteration_count, int N_power,
-                COMPLEX<T> n_inverse, bool last_kernel, bool NTT_mult,
-                int offset2, bool reduction_poly_check);
-
     // COMPLEX<T> to COMPLEX<T>
     template <typename T>
     __host__ void
@@ -153,18 +125,6 @@ namespace gpufft
      */
 
     template <typename T>
-    __global__ void Special_ForwardCore(COMPLEX<T>* polynomial,
-                                        COMPLEX<T>* inverse_root_of_unity_table,
-                                        int shared_index, int logm, int k,
-                                        int outer_iteration_count, int N_power);
-
-    template <typename T>
-    __global__ void
-    Special_InverseCore(COMPLEX<T>* polynomial, COMPLEX<T>* root_of_unity_table,
-                        int shared_index, int logm, int outer_iteration_count,
-                        int N_power, COMPLEX<T> n_inverse,
-                        bool not_last_kernel);
-    template <typename T>
     __host__ void GPU_Special_FFT(COMPLEX<T>* device_inout,
                                   COMPLEX<T>* root_of_unity_table,
                                   fft_configuration<T> cfg, int batch_size);
@@ -212,32 +172,6 @@ namespace gpufft
      *
      * 9. Return h.
      */
-
-    template <typename T>
-    __global__ void
-    ForwardFFNTCoreUnique(T* polynomial_in, COMPLEX<T>* polynomial_out,
-                          COMPLEX<T>* twist_table,
-                          COMPLEX<T>* root_of_unity_table, int shared_index,
-                          int logm, int outer_iteration_count, int N_power);
-
-    template <typename T>
-    __global__ void ForwardFFNTCoreRegular(COMPLEX<T>* polynomial,
-                                           COMPLEX<T>* root_of_unity_table,
-                                           int shared_index, int logm,
-                                           int outer_iteration_count,
-                                           int N_power, bool not_last_kernel);
-
-    template <typename T>
-    __global__ void InverseFFNTCoreRegular(
-        COMPLEX<T>* polynomial, COMPLEX<T>* inverse_root_of_unity_table,
-        int shared_index, int logm, int k, int outer_iteration_count,
-        int N_power, bool NTT_mult, int offset2);
-
-    template <typename T>
-    __global__ void InverseFFNTCoreUnique(
-        COMPLEX<T>* polynomial_in, T* polynomial_out, COMPLEX<T>* untwist_table,
-        COMPLEX<T>* inverse_root_of_unity_table, int shared_index, int logm,
-        int k, int outer_iteration_count, int N_power, COMPLEX<T> n_inverse);
 
     template <typename T>
     __host__ void

@@ -5,12 +5,30 @@
 // Paper: https://eprint.iacr.org/2023/1410
 
 #include <stdexcept>
+#include <type_traits>
+#include <utility>
 
 #include "gpufft/fft.cuh"
 #include "gpufft/fft_device.cuh"
 
+// The host API runs every transform with kernels that take the size as a
+// template parameter and read their launch parameters from the stage plan at
+// compile time.
+
 namespace gpufft
 {
+    static constexpr int kMinLogN = 12;
+    static constexpr int kMinSpecialLogN = 11;
+    static constexpr int kMaxLogN = 24;
+
+    static void check_n_power(int n_power, int min_log_n)
+    {
+        if (n_power < min_log_n || n_power > kMaxLogN)
+        {
+            throw std::invalid_argument("Invalid n_power range!");
+        }
+    }
+
     // The batch is the third grid dimension, and kernels compute global
     // memory offsets (including the second operand of a multiplication) with
     // 32-bit integers.
@@ -27,186 +45,324 @@ namespace gpufft
         }
     }
 
-    template <typename T>
-    __global__ void
-    ForwardCore(COMPLEX<T>* polynomial, COMPLEX<T>* root_of_unity_table,
-                int shared_index, int logm, int outer_iteration_count,
-                int N_power, bool not_last_kernel, bool reduction_poly_check)
+    // Launch parameters of kernel I of a transform of size 2^LogN.
+    template <typename T, type D, int LogN, int I> struct StageConfig
     {
+        static constexpr StagePlan plan = stage_plan<T>(D, LogN);
+
+        static_assert(I >= 0 && I < plan.count, "Stage index out of range");
+
+        static constexpr KernelConfig config = plan.stage[I];
+    };
+
+    // ---------------- Kernels ----------------
+
+    // Stage I of a forward FFT: reads polynomial_in (complex or real) and
+    // writes polynomial_out.
+    template <int LogN, int I, typename In, typename T>
+    __global__ void
+    ForwardStage(const In* polynomial_in, COMPLEX<T>* polynomial_out,
+                 COMPLEX<T>* root_of_unity_table, bool reduction_poly_check)
+    {
+        constexpr KernelConfig k = StageConfig<T, FORWARD, LogN, I>::config;
+
         COMPLEX<T>* shared_memory = stage_shared<T>();
         const StageThread thread =
-            StageThreadState(logm, outer_iteration_count, N_power);
-        const location_t global_address = poly_address(thread, N_power);
+            StageThreadState(k.logm, k.outer_iteration_count, LogN);
+        const location_t global_address = poly_address(thread, LogN);
 
-        StageLoad(thread, shared_memory, polynomial, global_address);
+        StageLoad(thread, shared_memory, polynomial_in, global_address);
         DecreasingStageExecute<CooleyTukey>(
             thread, shared_memory, root_of_unity_table,
-            PolyRoots<false>{reduction_poly_check, N_power - logm - 1,
-                             (location_t) 1 << logm},
-            shared_index, outer_iteration_count, not_last_kernel,
-            shared_index - 5);
+            PolyRoots<false>{reduction_poly_check, LogN - k.logm - 1,
+                             (location_t) 1 << k.logm},
+            k.shared_index, k.outer_iteration_count, k.not_last_kernel,
+            k.shared_index - 5);
+        StageStore(thread, shared_memory, polynomial_out, global_address);
+    }
+
+    // Stage I of an inverse FFT: reads polynomial_in, in the first stage
+    // times the second operand at polynomial_in + offset2 if multiplication
+    // is set, and writes polynomial_out (complex or real), in the last stage
+    // times n_inverse.
+    template <int LogN, int I, typename T, typename Out>
+    __global__ void
+    InverseStage(const COMPLEX<T>* polynomial_in, Out* polynomial_out,
+                 COMPLEX<T>* inverse_root_of_unity_table, COMPLEX<T> n_inverse,
+                 bool multiplication, int offset2, bool reduction_poly_check)
+    {
+        constexpr KernelConfig k = StageConfig<T, INVERSE, LogN, I>::config;
+
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(k.k, k.outer_iteration_count, LogN);
+        const location_t global_address = poly_address(thread, LogN);
+
+        if (I == 0 && multiplication)
+            StageLoadProduct(thread, shared_memory, polynomial_in,
+                             global_address, offset2);
+        else
+            StageLoad(thread, shared_memory, polynomial_in, global_address);
+        IncreasingStageExecute<GentlemanSande>(
+            thread, shared_memory, inverse_root_of_unity_table,
+            PolyRoots<true>{reduction_poly_check, LogN - k.logm - 1,
+                            (location_t) 1 << k.logm},
+            (k.shared_index + 1) - k.outer_iteration_count,
+            k.outer_iteration_count);
+        // The inverse plan stores the last_kernel flag in not_last_kernel.
+        if constexpr (k.not_last_kernel)
+            StageStoreScaled(thread, shared_memory, polynomial_out,
+                             global_address, n_inverse);
+        else
+            StageStore(thread, shared_memory, polynomial_out, global_address);
+    }
+
+    // Stage I of a forward Special FFT, which runs the inverse plan.
+    template <int LogN, int I, typename T>
+    __global__ void SpecialForwardStage(COMPLEX<T>* polynomial,
+                                        COMPLEX<T>* inverse_root_of_unity_table)
+    {
+        constexpr KernelConfig k = StageConfig<T, INVERSE, LogN, I>::config;
+
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(k.k, k.outer_iteration_count, LogN);
+        const location_t global_address = poly_address(thread, LogN);
+
+        StageLoad(thread, shared_memory, polynomial, global_address);
+        IncreasingStageExecute<CooleyTukey>(
+            thread, shared_memory, inverse_root_of_unity_table,
+            SpecialRoots<true>{(location_t) 1 << (LogN - k.logm - 1)},
+            (k.shared_index + 1) - k.outer_iteration_count,
+            k.outer_iteration_count);
         StageStore(thread, shared_memory, polynomial, global_address);
     }
 
-    template <typename T>
-    __global__ void
-    InverseCore(COMPLEX<T>* polynomial, COMPLEX<T>* inverse_root_of_unity_table,
-                int shared_index, int logm, int k, int outer_iteration_count,
-                int N_power, COMPLEX<T> n_inverse, bool last_kernel,
-                bool NTT_mult, int offset2, bool reduction_poly_check)
+    // Stage I of an inverse Special FFT, which runs the forward plan; the
+    // last stage multiplies by n_inverse.
+    template <int LogN, int I, typename T>
+    __global__ void SpecialInverseStage(COMPLEX<T>* polynomial,
+                                        COMPLEX<T>* root_of_unity_table,
+                                        COMPLEX<T> n_inverse)
     {
+        constexpr KernelConfig k = StageConfig<T, FORWARD, LogN, I>::config;
+
         COMPLEX<T>* shared_memory = stage_shared<T>();
         const StageThread thread =
-            StageThreadState(k, outer_iteration_count, N_power);
-        const location_t global_address = poly_address(thread, N_power);
+            StageThreadState(k.logm, k.outer_iteration_count, LogN);
+        const location_t global_address = poly_address(thread, LogN);
 
-        if (NTT_mult)
+        StageLoad(thread, shared_memory, polynomial, global_address);
+        DecreasingStageExecute<GentlemanSande>(
+            thread, shared_memory, root_of_unity_table,
+            SpecialRoots<false>{(location_t) 1 << (LogN - k.logm - 1)},
+            k.shared_index, k.outer_iteration_count, k.not_last_kernel,
+            k.shared_index - 5);
+        if constexpr (k.not_last_kernel)
+            StageStore(thread, shared_memory, polynomial, global_address);
+        else
+            StageStoreScaled(thread, shared_memory, polynomial, global_address,
+                             n_inverse);
+    }
+
+    // Stage I of a forward FFNT of 2^(LogN + 1) real values, an FFT of size
+    // 2^LogN: the first stage folds and twists polynomial_in, every stage
+    // writes polynomial and the later stages read it in place.
+    template <int LogN, int I, typename T>
+    __global__ void FFNTForwardStage(const T* polynomial_in,
+                                     COMPLEX<T>* polynomial,
+                                     const COMPLEX<T>* twist_table,
+                                     COMPLEX<T>* root_of_unity_table)
+    {
+        constexpr KernelConfig k = StageConfig<T, FORWARD, LogN, I>::config;
+
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(k.logm, k.outer_iteration_count, LogN);
+        const location_t global_address = poly_address(thread, LogN);
+
+        if constexpr (I == 0)
+            StageLoadFoldTwist(thread, shared_memory, polynomial_in,
+                               poly_address(thread, LogN + 1), twist_table,
+                               LogN);
+        else
+            StageLoad(thread, shared_memory, polynomial, global_address);
+        DecreasingStageExecute<CooleyTukey>(
+            thread, shared_memory, root_of_unity_table,
+            CyclicRoots<false>{LogN - k.logm - 1}, k.shared_index,
+            k.outer_iteration_count, k.not_last_kernel, k.shared_index - 5);
+        StageStore(thread, shared_memory, polynomial, global_address);
+    }
+
+    // Stage I of an inverse FFNT: every stage reads polynomial, the first
+    // one times the second operand at polynomial + offset2 if multiplication
+    // is set; the last stage multiplies by n_inverse, untwists and unfolds
+    // into polynomial_out, the others write polynomial in place.
+    template <int LogN, int I, typename T>
+    __global__ void FFNTInverseStage(COMPLEX<T>* polynomial, T* polynomial_out,
+                                     const COMPLEX<T>* untwist_table,
+                                     COMPLEX<T>* inverse_root_of_unity_table,
+                                     COMPLEX<T> n_inverse, bool multiplication,
+                                     int offset2)
+    {
+        constexpr KernelConfig k = StageConfig<T, INVERSE, LogN, I>::config;
+
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const StageThread thread =
+            StageThreadState(k.k, k.outer_iteration_count, LogN);
+        const location_t global_address = poly_address(thread, LogN);
+
+        if (I == 0 && multiplication)
             StageLoadProduct(thread, shared_memory, polynomial, global_address,
                              offset2);
         else
             StageLoad(thread, shared_memory, polynomial, global_address);
         IncreasingStageExecute<GentlemanSande>(
             thread, shared_memory, inverse_root_of_unity_table,
-            PolyRoots<true>{reduction_poly_check, N_power - logm - 1,
-                            (location_t) 1 << logm},
-            (shared_index + 1) - outer_iteration_count, outer_iteration_count);
-        if (last_kernel)
-            StageStoreScaled(thread, shared_memory, polynomial, global_address,
-                             n_inverse);
+            CyclicRoots<true>{LogN - k.logm - 1},
+            (k.shared_index + 1) - k.outer_iteration_count,
+            k.outer_iteration_count);
+        if constexpr (k.not_last_kernel)
+            StageStoreUntwistUnfold(thread, shared_memory, polynomial_out,
+                                    poly_address(thread, LogN + 1),
+                                    untwist_table, n_inverse, LogN);
         else
             StageStore(thread, shared_memory, polynomial, global_address);
     }
 
-    template <typename T>
-    __global__ void ForwardCore(T* input, COMPLEX<T>* polynomial,
-                                COMPLEX<T>* root_of_unity_table,
-                                int shared_index, int logm,
-                                int outer_iteration_count, int N_power,
-                                bool not_last_kernel, bool reduction_poly_check)
-    {
-        COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(logm, outer_iteration_count, N_power);
-        const location_t global_address = poly_address(thread, N_power);
+    // ---------------- Launch ----------------
 
-        StageLoad(thread, shared_memory, input, global_address);
-        DecreasingStageExecute<CooleyTukey>(
-            thread, shared_memory, root_of_unity_table,
-            PolyRoots<false>{reduction_poly_check, N_power - logm - 1,
-                             (location_t) 1 << logm},
-            shared_index, outer_iteration_count, not_last_kernel,
-            shared_index - 5);
-        StageStore(thread, shared_memory, polynomial, global_address);
+    // Calls f(std::integral_constant<int, n_power>()) if n_power is in
+    // [LogN, MaxLogN]; the host API checks the range before.
+    template <int LogN, int MaxLogN, typename F>
+    void dispatch_log_n(int n_power, F&& f)
+    {
+        if constexpr (LogN <= MaxLogN)
+        {
+            if (n_power == LogN)
+            {
+                f(std::integral_constant<int, LogN>());
+            }
+            else
+            {
+                dispatch_log_n<LogN + 1, MaxLogN>(n_power, f);
+            }
+        }
     }
 
-    template <typename T>
-    __global__ void
-    InverseCore(T* output, COMPLEX<T>* polynomial,
-                COMPLEX<T>* inverse_root_of_unity_table, int shared_index,
-                int logm, int k, int outer_iteration_count, int N_power,
-                COMPLEX<T> n_inverse, bool last_kernel, bool NTT_mult,
-                int offset2, bool reduction_poly_check)
+    template <typename F, int... I>
+    void for_each_stage(F&& f, std::integer_sequence<int, I...>)
     {
-        COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(k, outer_iteration_count, N_power);
-        const location_t global_address = poly_address(thread, N_power);
-
-        if (NTT_mult)
-            StageLoadProduct(thread, shared_memory, polynomial, global_address,
-                             offset2);
-        else
-            StageLoad(thread, shared_memory, polynomial, global_address);
-        IncreasingStageExecute<GentlemanSande>(
-            thread, shared_memory, inverse_root_of_unity_table,
-            PolyRoots<true>{reduction_poly_check, N_power - logm - 1,
-                            (location_t) 1 << logm},
-            (shared_index + 1) - outer_iteration_count, outer_iteration_count);
-        if (last_kernel)
-            StageStoreScaled(thread, shared_memory, output, global_address,
-                             n_inverse);
-        else
-            StageStore(thread, shared_memory, output, global_address);
+        (f(std::integral_constant<int, I>()), ...);
     }
+
+    // Calls f(std::integral_constant<int, I>()) for the stages of the plan
+    // of direction D and size 2^LogN, in launch order.
+    template <typename T, type D, int LogN, typename F>
+    void for_each_stage(F&& f)
+    {
+        for_each_stage(
+            f, std::make_integer_sequence<int, stage_plan<T>(D, LogN).count>());
+    }
+
+    // Launches kernel with the launch parameters of stage I of the plan of
+    // direction D and size 2^LogN; blockIdx.z is the polynomial.
+    template <typename T, type D, int LogN, int I, typename Kernel,
+              typename... Args>
+    void launch_stage(Kernel kernel, int batch_size, cudaStream_t stream,
+                      Args... args)
+    {
+        constexpr KernelConfig k = StageConfig<T, D, LogN, I>::config;
+
+        kernel<<<dim3(k.griddim_x, k.griddim_y, batch_size),
+                 dim3(k.blockdim_x, k.blockdim_y), k.shared_memory, stream>>>(
+            args...);
+        GPUFFT_CUDA_CHECK(cudaGetLastError());
+    }
+
+    // The first stage reads polynomial_in; every stage writes
+    // polynomial_out and the later stages read it in place.
+    template <int LogN, typename In, typename T>
+    void forward_stages(const In* polynomial_in, COMPLEX<T>* polynomial_out,
+                        COMPLEX<T>* root_of_unity_table,
+                        bool reduction_poly_check, int batch_size,
+                        cudaStream_t stream)
+    {
+        for_each_stage<T, FORWARD, LogN>(
+            [&](auto stage)
+            {
+                constexpr int I = decltype(stage)::value;
+                if constexpr (I == 0)
+                    launch_stage<T, FORWARD, LogN, I>(
+                        ForwardStage<LogN, I, In, T>, batch_size, stream,
+                        polynomial_in, polynomial_out, root_of_unity_table,
+                        reduction_poly_check);
+                else
+                    launch_stage<T, FORWARD, LogN, I>(
+                        ForwardStage<LogN, I, COMPLEX<T>, T>, batch_size,
+                        stream, polynomial_out, polynomial_out,
+                        root_of_unity_table, reduction_poly_check);
+            });
+    }
+
+    // Every stage reads polynomial_in; the last one writes polynomial_out,
+    // the others write polynomial_in in place.
+    template <int LogN, typename T, typename Out>
+    void inverse_stages(COMPLEX<T>* polynomial_in, Out* polynomial_out,
+                        COMPLEX<T>* inverse_root_of_unity_table,
+                        COMPLEX<T> n_inverse, bool multiplication, int offset2,
+                        bool reduction_poly_check, int batch_size,
+                        cudaStream_t stream)
+    {
+        constexpr int count = stage_plan<T>(INVERSE, LogN).count;
+
+        for_each_stage<T, INVERSE, LogN>(
+            [&](auto stage)
+            {
+                constexpr int I = decltype(stage)::value;
+                if constexpr (I + 1 == count)
+                    launch_stage<T, INVERSE, LogN, I>(
+                        InverseStage<LogN, I, T, Out>, batch_size, stream,
+                        polynomial_in, polynomial_out,
+                        inverse_root_of_unity_table, n_inverse, multiplication,
+                        offset2, reduction_poly_check);
+                else
+                    launch_stage<T, INVERSE, LogN, I>(
+                        InverseStage<LogN, I, T, COMPLEX<T>>, batch_size,
+                        stream, polynomial_in, polynomial_in,
+                        inverse_root_of_unity_table, n_inverse, multiplication,
+                        offset2, reduction_poly_check);
+            });
+    }
+
+    // ---------------- Host API ----------------
 
     template <typename T>
     __host__ void
     GPU_FFT(COMPLEX<T>* device_inout, COMPLEX<T>* root_of_unity_table,
             fft_configuration<T> cfg, int batch_size, bool multiplication)
     {
-        if ((cfg.n_power <= 11 || cfg.n_power >= 25))
-        {
-            throw std::invalid_argument("Invalid n_power range!");
-        }
-
+        check_n_power(cfg.n_power, kMinLogN);
         check_batch_size(cfg.n_power, batch_size);
 
-        const StagePlan plan = stage_plan<T>(cfg.fft_type, cfg.n_power);
-
-        switch (cfg.fft_type)
-        {
-            case FORWARD:
-                for (int i = 0; i < plan.count; i++)
-                {
-                    auto& current_kernel_params = plan.stage[i];
-                    ForwardCore<<<
-                        dim3(current_kernel_params.griddim_x,
-                             current_kernel_params.griddim_y, batch_size),
-                        dim3(current_kernel_params.blockdim_x,
-                             current_kernel_params.blockdim_y),
-                        current_kernel_params.shared_memory, cfg.stream>>>(
-                        device_inout, root_of_unity_table,
-                        current_kernel_params.shared_index,
-                        current_kernel_params.logm,
-                        current_kernel_params.outer_iteration_count,
-                        cfg.n_power, current_kernel_params.not_last_kernel,
-                        (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                    GPUFFT_CUDA_CHECK(cudaGetLastError());
-                }
-                break;
-            case INVERSE:
+        const bool x_n_minus =
+            (cfg.reduction_poly == ReductionPolynomial::X_N_minus);
+        dispatch_log_n<kMinLogN, kMaxLogN>(
+            cfg.n_power,
+            [&](auto log_n)
             {
-                auto& current_kernel_params = plan.stage[0];
-                InverseCore<<<dim3(current_kernel_params.griddim_x,
-                                   current_kernel_params.griddim_y, batch_size),
-                              dim3(current_kernel_params.blockdim_x,
-                                   current_kernel_params.blockdim_y),
-                              current_kernel_params.shared_memory,
-                              cfg.stream>>>(
-                    device_inout, root_of_unity_table,
-                    current_kernel_params.shared_index,
-                    current_kernel_params.logm, current_kernel_params.k,
-                    current_kernel_params.outer_iteration_count, cfg.n_power,
-                    cfg.mod_inverse, current_kernel_params.not_last_kernel,
-                    multiplication, (batch_size << cfg.n_power),
-                    (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                GPUFFT_CUDA_CHECK(cudaGetLastError());
-
-                for (int i = 1; i < plan.count; i++)
-                {
-                    auto& current_kernel_params = plan.stage[i];
-                    InverseCore<<<
-                        dim3(current_kernel_params.griddim_x,
-                             current_kernel_params.griddim_y, batch_size),
-                        dim3(current_kernel_params.blockdim_x,
-                             current_kernel_params.blockdim_y),
-                        current_kernel_params.shared_memory, cfg.stream>>>(
-                        device_inout, root_of_unity_table,
-                        current_kernel_params.shared_index,
-                        current_kernel_params.logm, current_kernel_params.k,
-                        current_kernel_params.outer_iteration_count,
-                        cfg.n_power, cfg.mod_inverse,
-                        current_kernel_params.not_last_kernel, false,
-                        (batch_size << cfg.n_power),
-                        (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                    GPUFFT_CUDA_CHECK(cudaGetLastError());
-                }
-            }
-            break;
-
-            default:
-                break;
-        }
+                constexpr int LogN = decltype(log_n)::value;
+                if (cfg.fft_type == FORWARD)
+                    forward_stages<LogN>(device_inout, device_inout,
+                                         root_of_unity_table, x_n_minus,
+                                         batch_size, cfg.stream);
+                else if (cfg.fft_type == INVERSE)
+                    inverse_stages<LogN>(device_inout, device_inout,
+                                         root_of_unity_table, cfg.mod_inverse,
+                                         multiplication,
+                                         batch_size << cfg.n_power, x_n_minus,
+                                         batch_size, cfg.stream);
+            });
     }
 
     template <typename T>
@@ -215,163 +371,27 @@ namespace gpufft
             COMPLEX<T>* root_of_unity_table, fft_configuration<T> cfg,
             int batch_size, bool multiplication)
     {
-        if ((cfg.n_power <= 11 || cfg.n_power >= 25))
-        {
-            throw std::invalid_argument("Invalid n_power range!");
-        }
-
+        check_n_power(cfg.n_power, kMinLogN);
         check_batch_size(cfg.n_power, batch_size);
 
-        const StagePlan plan = stage_plan<T>(cfg.fft_type, cfg.n_power);
-
-        switch (cfg.fft_type)
-        {
-            case FORWARD:
+        const bool x_n_minus =
+            (cfg.reduction_poly == ReductionPolynomial::X_N_minus);
+        dispatch_log_n<kMinLogN, kMaxLogN>(
+            cfg.n_power,
+            [&](auto log_n)
             {
-                auto& current_kernel_params = plan.stage[0];
-                ForwardCore<<<dim3(current_kernel_params.griddim_x,
-                                   current_kernel_params.griddim_y, batch_size),
-                              dim3(current_kernel_params.blockdim_x,
-                                   current_kernel_params.blockdim_y),
-                              current_kernel_params.shared_memory,
-                              cfg.stream>>>(
-                    device_fix_inout, device_Complex64_inout,
-                    root_of_unity_table, current_kernel_params.shared_index,
-                    current_kernel_params.logm,
-                    current_kernel_params.outer_iteration_count, cfg.n_power,
-                    current_kernel_params.not_last_kernel,
-                    (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                GPUFFT_CUDA_CHECK(cudaGetLastError());
-
-                for (int i = 1; i < plan.count; i++)
-                {
-                    auto& current_kernel_params = plan.stage[i];
-                    ForwardCore<<<
-                        dim3(current_kernel_params.griddim_x,
-                             current_kernel_params.griddim_y, batch_size),
-                        dim3(current_kernel_params.blockdim_x,
-                             current_kernel_params.blockdim_y),
-                        current_kernel_params.shared_memory, cfg.stream>>>(
-                        device_Complex64_inout, root_of_unity_table,
-                        current_kernel_params.shared_index,
-                        current_kernel_params.logm,
-                        current_kernel_params.outer_iteration_count,
-                        cfg.n_power, current_kernel_params.not_last_kernel,
-                        (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                    GPUFFT_CUDA_CHECK(cudaGetLastError());
-                }
-            }
-            break;
-            case INVERSE:
-            {
-                auto& current_kernel_params = plan.stage[0];
-                InverseCore<<<dim3(current_kernel_params.griddim_x,
-                                   current_kernel_params.griddim_y, batch_size),
-                              dim3(current_kernel_params.blockdim_x,
-                                   current_kernel_params.blockdim_y),
-                              current_kernel_params.shared_memory,
-                              cfg.stream>>>(
-                    device_Complex64_inout, root_of_unity_table,
-                    current_kernel_params.shared_index,
-                    current_kernel_params.logm, current_kernel_params.k,
-                    current_kernel_params.outer_iteration_count, cfg.n_power,
-                    cfg.mod_inverse, current_kernel_params.not_last_kernel,
-                    multiplication, (batch_size << cfg.n_power),
-                    (cfg.reduction_poly == ReductionPolynomial::X_N_minus));
-                GPUFFT_CUDA_CHECK(cudaGetLastError());
-
-                for (int i = 1; i < plan.count; i++)
-                {
-                    if (i == (plan.count - 1))
-                    {
-                        auto& current_kernel_params = plan.stage[i];
-                        InverseCore<<<
-                            dim3(current_kernel_params.griddim_x,
-                                 current_kernel_params.griddim_y, batch_size),
-                            dim3(current_kernel_params.blockdim_x,
-                                 current_kernel_params.blockdim_y),
-                            current_kernel_params.shared_memory, cfg.stream>>>(
-                            device_fix_inout, device_Complex64_inout,
-                            root_of_unity_table,
-                            current_kernel_params.shared_index,
-                            current_kernel_params.logm, current_kernel_params.k,
-                            current_kernel_params.outer_iteration_count,
-                            cfg.n_power, cfg.mod_inverse,
-                            current_kernel_params.not_last_kernel, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        GPUFFT_CUDA_CHECK(cudaGetLastError());
-                    }
-                    else
-                    {
-                        auto& current_kernel_params = plan.stage[i];
-                        InverseCore<<<
-                            dim3(current_kernel_params.griddim_x,
-                                 current_kernel_params.griddim_y, batch_size),
-                            dim3(current_kernel_params.blockdim_x,
-                                 current_kernel_params.blockdim_y),
-                            current_kernel_params.shared_memory, cfg.stream>>>(
-                            device_Complex64_inout, root_of_unity_table,
-                            current_kernel_params.shared_index,
-                            current_kernel_params.logm, current_kernel_params.k,
-                            current_kernel_params.outer_iteration_count,
-                            cfg.n_power, cfg.mod_inverse,
-                            current_kernel_params.not_last_kernel, false,
-                            (batch_size << cfg.n_power),
-                            (cfg.reduction_poly ==
-                             ReductionPolynomial::X_N_minus));
-                        GPUFFT_CUDA_CHECK(cudaGetLastError());
-                    }
-                }
-            }
-            break;
-
-            default:
-                break;
-        }
-    }
-
-    template <typename T>
-    __global__ void
-    Special_InverseCore(COMPLEX<T>* polynomial, COMPLEX<T>* root_of_unity_table,
-                        int shared_index, int logm, int outer_iteration_count,
-                        int N_power, COMPLEX<T> n_inverse, bool not_last_kernel)
-    {
-        COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(logm, outer_iteration_count, N_power);
-        const location_t global_address = poly_address(thread, N_power);
-
-        StageLoad(thread, shared_memory, polynomial, global_address);
-        DecreasingStageExecute<GentlemanSande>(
-            thread, shared_memory, root_of_unity_table,
-            SpecialRoots<false>{(location_t) 1 << (N_power - logm - 1)}, 8,
-            outer_iteration_count, not_last_kernel, 3);
-        if (not_last_kernel)
-            StageStore(thread, shared_memory, polynomial, global_address);
-        else
-            StageStoreScaled(thread, shared_memory, polynomial, global_address,
-                             n_inverse);
-    }
-
-    template <typename T>
-    __global__ void Special_ForwardCore(COMPLEX<T>* polynomial,
-                                        COMPLEX<T>* inverse_root_of_unity_table,
-                                        int shared_index, int logm, int k,
-                                        int outer_iteration_count, int N_power)
-    {
-        COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(k, outer_iteration_count, N_power);
-        const location_t global_address = poly_address(thread, N_power);
-
-        StageLoad(thread, shared_memory, polynomial, global_address);
-        IncreasingStageExecute<CooleyTukey>(
-            thread, shared_memory, inverse_root_of_unity_table,
-            SpecialRoots<true>{(location_t) 1 << (N_power - logm - 1)},
-            (shared_index + 1) - outer_iteration_count, outer_iteration_count);
-        StageStore(thread, shared_memory, polynomial, global_address);
+                constexpr int LogN = decltype(log_n)::value;
+                if (cfg.fft_type == FORWARD)
+                    forward_stages<LogN>(
+                        device_fix_inout, device_Complex64_inout,
+                        root_of_unity_table, x_n_minus, batch_size, cfg.stream);
+                else if (cfg.fft_type == INVERSE)
+                    inverse_stages<LogN>(device_Complex64_inout,
+                                         device_fix_inout, root_of_unity_table,
+                                         cfg.mod_inverse, multiplication,
+                                         batch_size << cfg.n_power, x_n_minus,
+                                         batch_size, cfg.stream);
+            });
     }
 
     template <typename T>
@@ -379,168 +399,34 @@ namespace gpufft
                                   COMPLEX<T>* root_of_unity_table,
                                   fft_configuration<T> cfg, int batch_size)
     {
-        if ((cfg.n_power <= 10 || cfg.n_power >= 25))
-        {
-            throw std::invalid_argument("Invalid n_power range!");
-        }
-
+        check_n_power(cfg.n_power, kMinSpecialLogN);
         check_batch_size(cfg.n_power, batch_size);
 
-        // The Special FFT runs the inverse plan forward and the forward plan
-        // inverse.
-        const StagePlan plan = stage_plan<T>(
-            (cfg.fft_type == FORWARD) ? INVERSE : FORWARD, cfg.n_power);
-
-        switch (cfg.fft_type)
-        {
-            case FORWARD:
-                for (int i = 0; i < plan.count; i++)
-                {
-                    auto& current_kernel_params = plan.stage[i];
-                    Special_ForwardCore<<<
-                        dim3(current_kernel_params.griddim_x,
-                             current_kernel_params.griddim_y, batch_size),
-                        dim3(current_kernel_params.blockdim_x,
-                             current_kernel_params.blockdim_y),
-                        current_kernel_params.shared_memory, cfg.stream>>>(
-                        device_inout, root_of_unity_table,
-                        current_kernel_params.shared_index,
-                        current_kernel_params.logm, current_kernel_params.k,
-                        current_kernel_params.outer_iteration_count, cfg.n_power
-
-                    );
-                    GPUFFT_CUDA_CHECK(cudaGetLastError());
-                }
-                break;
-            case INVERSE:
+        dispatch_log_n<kMinSpecialLogN, kMaxLogN>(
+            cfg.n_power,
+            [&](auto log_n)
             {
-                for (int i = 0; i < plan.count - 1; i++)
-                {
-                    auto& current_kernel_params = plan.stage[i];
-                    Special_InverseCore<<<
-                        dim3(current_kernel_params.griddim_x,
-                             current_kernel_params.griddim_y, batch_size),
-                        dim3(current_kernel_params.blockdim_x,
-                             current_kernel_params.blockdim_y),
-                        current_kernel_params.shared_memory, cfg.stream>>>(
-                        device_inout, root_of_unity_table,
-                        current_kernel_params.shared_index,
-                        current_kernel_params.logm,
-                        current_kernel_params.outer_iteration_count,
-                        cfg.n_power, cfg.mod_inverse, true);
-                    GPUFFT_CUDA_CHECK(cudaGetLastError());
-                }
-
-                auto& current_kernel_params = plan.stage[plan.count - 1];
-                Special_InverseCore<<<
-                    dim3(current_kernel_params.griddim_x,
-                         current_kernel_params.griddim_y, batch_size),
-                    dim3(current_kernel_params.blockdim_x,
-                         current_kernel_params.blockdim_y),
-                    current_kernel_params.shared_memory, cfg.stream>>>(
-                    device_inout, root_of_unity_table,
-                    current_kernel_params.shared_index,
-                    current_kernel_params.logm,
-                    current_kernel_params.outer_iteration_count, cfg.n_power,
-                    cfg.mod_inverse, false);
-                GPUFFT_CUDA_CHECK(cudaGetLastError());
-            }
-            break;
-
-            default:
-                break;
-        }
-    }
-
-    /////////////////////////////////////////////
-    /////////////////////////////////////////////
-    /////////////////////////////////////////////
-
-    template <typename T>
-    __global__ void
-    ForwardFFNTCoreUnique(T* polynomial_in, COMPLEX<T>* polynomial_out,
-                          COMPLEX<T>* twist_table,
-                          COMPLEX<T>* root_of_unity_table, int shared_index,
-                          int logm, int outer_iteration_count, int N_power)
-    {
-        COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(logm, outer_iteration_count, N_power);
-
-        StageLoadFoldTwist(thread, shared_memory, polynomial_in,
-                           poly_address(thread, N_power + 1), twist_table,
-                           N_power);
-        DecreasingStageExecute<CooleyTukey>(
-            thread, shared_memory, root_of_unity_table,
-            CyclicRoots<false>{N_power - logm - 1}, shared_index,
-            outer_iteration_count, true, 0);
-        __syncthreads();
-        StageStore(thread, shared_memory, polynomial_out,
-                   poly_address(thread, N_power));
-    }
-
-    template <typename T>
-    __global__ void ForwardFFNTCoreRegular(COMPLEX<T>* polynomial,
-                                           COMPLEX<T>* root_of_unity_table,
-                                           int shared_index, int logm,
-                                           int outer_iteration_count,
-                                           int N_power, bool not_last_kernel)
-    {
-        COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(logm, outer_iteration_count, N_power);
-        const location_t global_address = poly_address(thread, N_power);
-
-        StageLoad(thread, shared_memory, polynomial, global_address);
-        DecreasingStageExecute<CooleyTukey>(
-            thread, shared_memory, root_of_unity_table,
-            CyclicRoots<false>{N_power - logm - 1}, shared_index,
-            outer_iteration_count, not_last_kernel, 3);
-        StageStore(thread, shared_memory, polynomial, global_address);
-    }
-
-    template <typename T>
-    __global__ void InverseFFNTCoreRegular(
-        COMPLEX<T>* polynomial, COMPLEX<T>* inverse_root_of_unity_table,
-        int shared_index, int logm, int k, int outer_iteration_count,
-        int N_power, bool NTT_mult, int offset2)
-    {
-        COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(k, outer_iteration_count, N_power);
-        const location_t global_address = poly_address(thread, N_power);
-
-        if (NTT_mult)
-            StageLoadProduct(thread, shared_memory, polynomial, global_address,
-                             offset2);
-        else
-            StageLoad(thread, shared_memory, polynomial, global_address);
-        IncreasingStageExecute<GentlemanSande>(
-            thread, shared_memory, inverse_root_of_unity_table,
-            CyclicRoots<true>{N_power - logm - 1},
-            (shared_index + 1) - outer_iteration_count, outer_iteration_count);
-        StageStore(thread, shared_memory, polynomial, global_address);
-    }
-
-    template <typename T>
-    __global__ void InverseFFNTCoreUnique(
-        COMPLEX<T>* polynomial_in, T* polynomial_out, COMPLEX<T>* untwist_table,
-        COMPLEX<T>* inverse_root_of_unity_table, int shared_index, int logm,
-        int k, int outer_iteration_count, int N_power, COMPLEX<T> n_inverse)
-    {
-        COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(k, outer_iteration_count, N_power);
-
-        StageLoad(thread, shared_memory, polynomial_in,
-                  poly_address(thread, N_power));
-        IncreasingStageExecute<GentlemanSande>(
-            thread, shared_memory, inverse_root_of_unity_table,
-            CyclicRoots<true>{N_power - logm - 1},
-            (shared_index + 1) - outer_iteration_count, outer_iteration_count);
-        StageStoreUntwistUnfold(thread, shared_memory, polynomial_out,
-                                poly_address(thread, N_power + 1),
-                                untwist_table, n_inverse, N_power);
+                constexpr int LogN = decltype(log_n)::value;
+                if (cfg.fft_type == FORWARD)
+                    for_each_stage<T, INVERSE, LogN>(
+                        [&](auto stage)
+                        {
+                            constexpr int I = decltype(stage)::value;
+                            launch_stage<T, INVERSE, LogN, I>(
+                                SpecialForwardStage<LogN, I, T>, batch_size,
+                                cfg.stream, device_inout, root_of_unity_table);
+                        });
+                else if (cfg.fft_type == INVERSE)
+                    for_each_stage<T, FORWARD, LogN>(
+                        [&](auto stage)
+                        {
+                            constexpr int I = decltype(stage)::value;
+                            launch_stage<T, FORWARD, LogN, I>(
+                                SpecialInverseStage<LogN, I, T>, batch_size,
+                                cfg.stream, device_inout, root_of_unity_table,
+                                cfg.mod_inverse);
+                        });
+            });
     }
 
     template <typename T>
@@ -549,175 +435,39 @@ namespace gpufft
              COMPLEX<T>* root_of_unity_table, fft_configuration<T> cfg,
              int batch_size, bool multiplication)
     {
-        if ((cfg.n_power <= 11 || cfg.n_power >= 25))
-        {
-            throw std::invalid_argument("Invalid n_power range!");
-        }
-
+        check_n_power(cfg.n_power, kMinLogN);
         check_batch_size(cfg.n_power, batch_size);
 
-        const StagePlan plan = stage_plan<T>(cfg.fft_type, cfg.n_power - 1);
-
-        switch (cfg.fft_type)
-        {
-            case FORWARD:
+        // The FFT of the folded values has size 2^(n_power - 1).
+        dispatch_log_n<kMinLogN - 1, kMaxLogN - 1>(
+            cfg.n_power - 1,
+            [&](auto log_n)
             {
-                auto& current_kernel_params = plan.stage[0];
-                ForwardFFNTCoreUnique<<<
-                    dim3(current_kernel_params.griddim_x,
-                         current_kernel_params.griddim_y, batch_size),
-                    dim3(current_kernel_params.blockdim_x,
-                         current_kernel_params.blockdim_y),
-                    current_kernel_params.shared_memory, cfg.stream>>>(
-                    device_inout, device_temp, twist_table, root_of_unity_table,
-                    current_kernel_params.shared_index,
-                    current_kernel_params.logm,
-                    current_kernel_params.outer_iteration_count,
-                    cfg.n_power - 1);
-                GPUFFT_CUDA_CHECK(cudaGetLastError());
-
-                for (int i = 1; i < plan.count - 1; i++)
-                {
-                    auto& current_kernel_params = plan.stage[i];
-                    ForwardFFNTCoreRegular<<<
-                        dim3(current_kernel_params.griddim_x,
-                             current_kernel_params.griddim_y, batch_size),
-                        dim3(current_kernel_params.blockdim_x,
-                             current_kernel_params.blockdim_y),
-                        current_kernel_params.shared_memory, cfg.stream>>>(
-                        device_temp, root_of_unity_table,
-                        current_kernel_params.shared_index,
-                        current_kernel_params.logm,
-                        current_kernel_params.outer_iteration_count,
-                        cfg.n_power - 1, true);
-                    GPUFFT_CUDA_CHECK(cudaGetLastError());
-                }
-
-                auto& last_kernel_params = plan.stage[plan.count - 1];
-                ForwardFFNTCoreRegular<<<
-                    dim3(last_kernel_params.griddim_x,
-                         last_kernel_params.griddim_y, batch_size),
-                    dim3(last_kernel_params.blockdim_x,
-                         last_kernel_params.blockdim_y),
-                    last_kernel_params.shared_memory, cfg.stream>>>(
-                    device_temp, root_of_unity_table,
-                    last_kernel_params.shared_index, last_kernel_params.logm,
-                    last_kernel_params.outer_iteration_count, cfg.n_power - 1,
-                    false);
-                GPUFFT_CUDA_CHECK(cudaGetLastError());
-            }
-            break;
-            case INVERSE:
-            {
-                auto& current_kernel_params = plan.stage[0];
-                InverseFFNTCoreRegular<<<
-                    dim3(current_kernel_params.griddim_x,
-                         current_kernel_params.griddim_y, batch_size),
-                    dim3(current_kernel_params.blockdim_x,
-                         current_kernel_params.blockdim_y),
-                    current_kernel_params.shared_memory, cfg.stream>>>(
-                    device_temp, root_of_unity_table,
-                    current_kernel_params.shared_index,
-                    current_kernel_params.logm, current_kernel_params.k,
-                    current_kernel_params.outer_iteration_count,
-                    cfg.n_power - 1, multiplication,
-                    (batch_size << (cfg.n_power - 1)));
-                GPUFFT_CUDA_CHECK(cudaGetLastError());
-
-                for (int i = 1; i < plan.count - 1; i++)
-                {
-                    auto& current_kernel_params = plan.stage[i];
-                    InverseFFNTCoreRegular<<<
-                        dim3(current_kernel_params.griddim_x,
-                             current_kernel_params.griddim_y, batch_size),
-                        dim3(current_kernel_params.blockdim_x,
-                             current_kernel_params.blockdim_y),
-                        current_kernel_params.shared_memory, cfg.stream>>>(
-                        device_temp, root_of_unity_table,
-                        current_kernel_params.shared_index,
-                        current_kernel_params.logm, current_kernel_params.k,
-                        current_kernel_params.outer_iteration_count,
-                        cfg.n_power - 1, false,
-                        (batch_size << (cfg.n_power - 1)));
-                    GPUFFT_CUDA_CHECK(cudaGetLastError());
-                }
-
-                auto& last_kernel_params = plan.stage[plan.count - 1];
-                InverseFFNTCoreUnique<<<
-                    dim3(last_kernel_params.griddim_x,
-                         last_kernel_params.griddim_y, batch_size),
-                    dim3(last_kernel_params.blockdim_x,
-                         last_kernel_params.blockdim_y),
-                    last_kernel_params.shared_memory, cfg.stream>>>(
-                    device_temp, device_inout, twist_table, root_of_unity_table,
-                    last_kernel_params.shared_index, last_kernel_params.logm,
-                    last_kernel_params.k,
-                    last_kernel_params.outer_iteration_count, cfg.n_power - 1,
-                    cfg.mod_inverse);
-                GPUFFT_CUDA_CHECK(cudaGetLastError());
-            }
-            break;
-
-            default:
-                break;
-        }
+                constexpr int LogN = decltype(log_n)::value;
+                if (cfg.fft_type == FORWARD)
+                    for_each_stage<T, FORWARD, LogN>(
+                        [&](auto stage)
+                        {
+                            constexpr int I = decltype(stage)::value;
+                            launch_stage<T, FORWARD, LogN, I>(
+                                FFNTForwardStage<LogN, I, T>, batch_size,
+                                cfg.stream, device_inout, device_temp,
+                                twist_table, root_of_unity_table);
+                        });
+                else if (cfg.fft_type == INVERSE)
+                    for_each_stage<T, INVERSE, LogN>(
+                        [&](auto stage)
+                        {
+                            constexpr int I = decltype(stage)::value;
+                            launch_stage<T, INVERSE, LogN, I>(
+                                FFNTInverseStage<LogN, I, T>, batch_size,
+                                cfg.stream, device_temp, device_inout,
+                                twist_table, root_of_unity_table,
+                                cfg.mod_inverse, multiplication,
+                                batch_size << LogN);
+                        });
+            });
     }
-
-    /////////////////////////////////////////////
-    /////////////////////////////////////////////
-    /////////////////////////////////////////////
-
-    template __global__ void
-    ForwardCore(Complex32* polynomial, Complex32* root_of_unity_table,
-                int shared_index, int logm, int outer_iteration_count,
-                int N_power, bool not_last_kernel, bool reduction_poly_check);
-
-    template __global__ void
-    ForwardCore(Complex64* polynomial, Complex64* root_of_unity_table,
-                int shared_index, int logm, int outer_iteration_count,
-                int N_power, bool not_last_kernel, bool reduction_poly_check);
-
-    template __global__ void
-    InverseCore(Complex32* polynomial, Complex32* inverse_root_of_unity_table,
-                int shared_index, int logm, int k, int outer_iteration_count,
-                int N_power, Complex32 n_inverse, bool last_kernel,
-                bool NTT_mult, int offset2, bool reduction_poly_check);
-
-    template __global__ void
-    InverseCore(Complex64* polynomial, Complex64* inverse_root_of_unity_table,
-                int shared_index, int logm, int k, int outer_iteration_count,
-                int N_power, Complex64 n_inverse, bool last_kernel,
-                bool NTT_mult, int offset2, bool reduction_poly_check);
-
-    template __global__ void ForwardCore(Float32* input, Complex32* polynomial,
-                                         Complex32* root_of_unity_table,
-                                         int shared_index, int logm,
-                                         int outer_iteration_count, int N_power,
-                                         bool not_last_kernel,
-                                         bool reduction_poly_check);
-
-    template __global__ void ForwardCore(Float64* input, Complex64* polynomial,
-                                         Complex64* root_of_unity_table,
-                                         int shared_index, int logm,
-                                         int outer_iteration_count, int N_power,
-                                         bool not_last_kernel,
-                                         bool reduction_poly_check);
-
-    template __global__ void InverseCore(Float32* output, Complex32* polynomial,
-                                         Complex32* inverse_root_of_unity_table,
-                                         int shared_index, int logm, int k,
-                                         int outer_iteration_count, int N_power,
-                                         Complex32 n_inverse, bool last_kernel,
-                                         bool NTT_mult, int offset2,
-                                         bool reduction_poly_check);
-
-    template __global__ void InverseCore(Float64* output, Complex64* polynomial,
-                                         Complex64* inverse_root_of_unity_table,
-                                         int shared_index, int logm, int k,
-                                         int outer_iteration_count, int N_power,
-                                         Complex64 n_inverse, bool last_kernel,
-                                         bool NTT_mult, int offset2,
-                                         bool reduction_poly_check);
 
     template __host__ void GPU_FFT(Complex32* device_inout,
                                    Complex32* root_of_unity_table,
@@ -741,28 +491,6 @@ namespace gpufft
                                    fft_configuration<Float64> cfg,
                                    int batch_size, bool multiplication);
 
-    template __global__ void
-    Special_ForwardCore(Complex32* polynomial,
-                        Complex32* inverse_root_of_unity_table,
-                        int shared_index, int logm, int k,
-                        int outer_iteration_count, int N_power);
-
-    template __global__ void
-    Special_ForwardCore(Complex64* polynomial,
-                        Complex64* inverse_root_of_unity_table,
-                        int shared_index, int logm, int k,
-                        int outer_iteration_count, int N_power);
-
-    template __global__ void
-    Special_InverseCore(Complex32* polynomial, Complex32* root_of_unity_table,
-                        int shared_index, int logm, int outer_iteration_count,
-                        int N_power, Complex32 n_inverse, bool not_last_kernel);
-
-    template __global__ void
-    Special_InverseCore(Complex64* polynomial, Complex64* root_of_unity_table,
-                        int shared_index, int logm, int outer_iteration_count,
-                        int N_power, Complex64 n_inverse, bool not_last_kernel);
-
     template __host__ void GPU_Special_FFT(Complex32* device_inout,
                                            Complex32* root_of_unity_table,
                                            fft_configuration<Float32> cfg,
@@ -772,48 +500,6 @@ namespace gpufft
                                            Complex64* root_of_unity_table,
                                            fft_configuration<Float64> cfg,
                                            int batch_size);
-
-    template __global__ void
-    ForwardFFNTCoreUnique(Float32* polynomial_in, Complex32* polynomial_out,
-                          Complex32* twist_table,
-                          Complex32* root_of_unity_table, int shared_index,
-                          int logm, int outer_iteration_count, int N_power);
-
-    template __global__ void
-    ForwardFFNTCoreUnique(Float64* polynomial_in, Complex64* polynomial_out,
-                          Complex64* twist_table,
-                          Complex64* root_of_unity_table, int shared_index,
-                          int logm, int outer_iteration_count, int N_power);
-
-    template __global__ void ForwardFFNTCoreRegular(
-        Complex32* polynomial, Complex32* root_of_unity_table, int shared_index,
-        int logm, int outer_iteration_count, int N_power, bool not_last_kernel);
-
-    template __global__ void ForwardFFNTCoreRegular(
-        Complex64* polynomial, Complex64* root_of_unity_table, int shared_index,
-        int logm, int outer_iteration_count, int N_power, bool not_last_kernel);
-
-    template __global__ void InverseFFNTCoreRegular(
-        Complex32* polynomial, Complex32* inverse_root_of_unity_table,
-        int shared_index, int logm, int k, int outer_iteration_count,
-        int N_power, bool NTT_mult, int offset2);
-
-    template __global__ void InverseFFNTCoreRegular(
-        Complex64* polynomial, Complex64* inverse_root_of_unity_table,
-        int shared_index, int logm, int k, int outer_iteration_count,
-        int N_power, bool NTT_mult, int offset2);
-
-    template __global__ void InverseFFNTCoreUnique(
-        Complex32* polynomial_in, Float32* polynomial_out,
-        Complex32* untwist_table, Complex32* inverse_root_of_unity_table,
-        int shared_index, int logm, int k, int outer_iteration_count,
-        int N_power, Complex32 n_inverse);
-
-    template __global__ void InverseFFNTCoreUnique(
-        Complex64* polynomial_in, Float64* polynomial_out,
-        Complex64* untwist_table, Complex64* inverse_root_of_unity_table,
-        int shared_index, int logm, int k, int outer_iteration_count,
-        int N_power, Complex64 n_inverse);
 
     template __host__ void GPU_FFNT(Float32* device_inout,
                                     Complex32* device_temp,
