@@ -18,6 +18,7 @@ file(REMOVE "${CMAKE_SOURCE_DIR}/compile_commands.json")
 
 set(EXECUTABLES
     benchmark_fft bench_fft.cu
+    benchmark_device_api bench_device_api.cu
 )
 
 function(add_benchmark exe source)
