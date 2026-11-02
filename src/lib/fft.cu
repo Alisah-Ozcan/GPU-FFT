@@ -18,8 +18,8 @@
 namespace gpufft
 {
     static constexpr int kMinLogN = 1;
-    static constexpr int kMinSpecialLogN = 11;
-    static constexpr int kMinFFNTLogN = 12;
+    static constexpr int kMinSpecialLogN = 1;
+    static constexpr int kMinFFNTLogN = 2;
 
     static void check_n_power(int n_power, int min_log_n)
     {
@@ -32,11 +32,11 @@ namespace gpufft
     // The batch is the third grid dimension of the stage kernels (the low
     // ring kernels spread it over grid x), and kernels compute global memory
     // offsets (including the second operand of a multiplication) with 32-bit
-    // integers.
-    static void check_batch_size(int n_power, int batch_size)
+    // integers. fft_log_n is the log2 size of the FFT the kernels run.
+    static void check_batch_size(int n_power, int batch_size, int fft_log_n)
     {
         if (batch_size <= 0 ||
-            (n_power > kLowRingMaxLogN && batch_size > 65535))
+            (fft_log_n > kLowRingMaxLogN && batch_size > 65535))
         {
             throw std::invalid_argument("Invalid batch_size!");
         }
@@ -100,6 +100,82 @@ namespace gpufft
         InverseLowRingExecute<LogN>(shared_memory, inverse_root_of_unity_table,
                                     reduction_poly_check);
         LowRingStoreScaled(thread, shared_memory, polynomial_out, n_inverse);
+    }
+
+    // Forward Special FFT of size 2^LogN <= 2^kLowRingMaxLogN in one kernel,
+    // in place.
+    template <int LogN, typename T>
+    __global__ void SpecialForwardLowRing(COMPLEX<T>* polynomial,
+                                          const COMPLEX<T>* root_table,
+                                          int batch_size)
+    {
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const LowRingThread thread = LowRingThreadState(LogN, batch_size);
+
+        LowRingLoad(thread, shared_memory, polynomial);
+        SpecialForwardLowRingExecute<LogN>(shared_memory, root_table);
+        LowRingStore(thread, shared_memory, polynomial);
+    }
+
+    // Inverse Special FFT of size 2^LogN <= 2^kLowRingMaxLogN in one kernel,
+    // in place, times n_inverse.
+    template <int LogN, typename T>
+    __global__ void SpecialInverseLowRing(COMPLEX<T>* polynomial,
+                                          const COMPLEX<T>* root_table,
+                                          COMPLEX<T> n_inverse, int batch_size)
+    {
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const LowRingThread thread = LowRingThreadState(LogN, batch_size);
+
+        LowRingLoad(thread, shared_memory, polynomial);
+        SpecialInverseLowRingExecute<LogN>(shared_memory, root_table);
+        LowRingStoreScaled(thread, shared_memory, polynomial, n_inverse);
+    }
+
+    // Forward FFNT of 2^(LogN + 1) real values with LogN <= kLowRingMaxLogN
+    // in one kernel: folds and twists polynomial_in and writes polynomial.
+    template <int LogN, typename T>
+    __global__ void
+    FFNTForwardLowRing(const T* polynomial_in, COMPLEX<T>* polynomial,
+                       const COMPLEX<T>* twist_table,
+                       const COMPLEX<T>* root_of_unity_table, int batch_size)
+    {
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const LowRingThread thread = LowRingThreadState(LogN, batch_size);
+        const location_t real_address =
+            LowRingThreadState(LogN + 1, batch_size).global_address;
+
+        LowRingLoadFoldTwist(thread, shared_memory, polynomial_in, real_address,
+                             twist_table, LogN);
+        ForwardLowRingExecute<LogN>(shared_memory, root_of_unity_table, true);
+        LowRingStore(thread, shared_memory, polynomial);
+    }
+
+    // Inverse FFNT with LogN <= kLowRingMaxLogN in one kernel: reads
+    // polynomial, times the second operand at polynomial + offset2 if
+    // multiplication is set, multiplies by n_inverse, untwists and unfolds
+    // into polynomial_out.
+    template <int LogN, typename T>
+    __global__ void
+    FFNTInverseLowRing(const COMPLEX<T>* polynomial, T* polynomial_out,
+                       const COMPLEX<T>* untwist_table,
+                       const COMPLEX<T>* inverse_root_of_unity_table,
+                       COMPLEX<T> n_inverse, bool multiplication, int offset2,
+                       int batch_size)
+    {
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const LowRingThread thread = LowRingThreadState(LogN, batch_size);
+        const location_t real_address =
+            LowRingThreadState(LogN + 1, batch_size).global_address;
+
+        if (multiplication)
+            LowRingLoadProduct(thread, shared_memory, polynomial, offset2);
+        else
+            LowRingLoad(thread, shared_memory, polynomial);
+        InverseLowRingExecute<LogN>(shared_memory, inverse_root_of_unity_table,
+                                    true);
+        LowRingStoreUntwistUnfold(thread, shared_memory, polynomial_out,
+                                  real_address, untwist_table, n_inverse, LogN);
     }
 
     // Stage I of a forward FFT: reads polynomial_in (complex or real) and
@@ -431,7 +507,7 @@ namespace gpufft
             fft_configuration<T> cfg, int batch_size, bool multiplication)
     {
         check_n_power(cfg.n_power, kMinLogN);
-        check_batch_size(cfg.n_power, batch_size);
+        check_batch_size(cfg.n_power, batch_size, cfg.n_power);
 
         const bool x_n_minus =
             (cfg.reduction_poly == ReductionPolynomial::X_N_minus);
@@ -460,7 +536,7 @@ namespace gpufft
             int batch_size, bool multiplication)
     {
         check_n_power(cfg.n_power, kMinLogN);
-        check_batch_size(cfg.n_power, batch_size);
+        check_batch_size(cfg.n_power, batch_size, cfg.n_power);
 
         const bool x_n_minus =
             (cfg.reduction_poly == ReductionPolynomial::X_N_minus);
@@ -488,14 +564,27 @@ namespace gpufft
                                   fft_configuration<T> cfg, int batch_size)
     {
         check_n_power(cfg.n_power, kMinSpecialLogN);
-        check_batch_size(cfg.n_power, batch_size);
+        check_batch_size(cfg.n_power, batch_size, cfg.n_power);
 
         dispatch_log_n<kMinSpecialLogN, kMaxLogN>(
             cfg.n_power,
             [&](auto log_n)
             {
                 constexpr int LogN = decltype(log_n)::value;
-                if (cfg.fft_type == FORWARD)
+                if constexpr (LogN <= kLowRingMaxLogN)
+                {
+                    if (cfg.fft_type == FORWARD)
+                        launch_low_ring<T, LogN>(
+                            SpecialForwardLowRing<LogN, T>, batch_size,
+                            cfg.stream, device_inout, root_of_unity_table,
+                            batch_size);
+                    else if (cfg.fft_type == INVERSE)
+                        launch_low_ring<T, LogN>(
+                            SpecialInverseLowRing<LogN, T>, batch_size,
+                            cfg.stream, device_inout, root_of_unity_table,
+                            cfg.mod_inverse, batch_size);
+                }
+                else if (cfg.fft_type == FORWARD)
                     for_each_stage<T, INVERSE, LogN>(
                         [&](auto stage)
                         {
@@ -524,7 +613,7 @@ namespace gpufft
              int batch_size, bool multiplication)
     {
         check_n_power(cfg.n_power, kMinFFNTLogN);
-        check_batch_size(cfg.n_power, batch_size);
+        check_batch_size(cfg.n_power, batch_size, cfg.n_power - 1);
 
         // The FFT of the folded values has size 2^(n_power - 1).
         dispatch_log_n<kMinFFNTLogN - 1, kMaxLogN - 1>(
@@ -532,7 +621,21 @@ namespace gpufft
             [&](auto log_n)
             {
                 constexpr int LogN = decltype(log_n)::value;
-                if (cfg.fft_type == FORWARD)
+                if constexpr (LogN <= kLowRingMaxLogN)
+                {
+                    if (cfg.fft_type == FORWARD)
+                        launch_low_ring<T, LogN>(
+                            FFNTForwardLowRing<LogN, T>, batch_size, cfg.stream,
+                            device_inout, device_temp, twist_table,
+                            root_of_unity_table, batch_size);
+                    else if (cfg.fft_type == INVERSE)
+                        launch_low_ring<T, LogN>(
+                            FFNTInverseLowRing<LogN, T>, batch_size, cfg.stream,
+                            device_temp, device_inout, twist_table,
+                            root_of_unity_table, cfg.mod_inverse,
+                            multiplication, batch_size << LogN, batch_size);
+                }
+                else if (cfg.fft_type == FORWARD)
                     for_each_stage<T, FORWARD, LogN>(
                         [&](auto stage)
                         {

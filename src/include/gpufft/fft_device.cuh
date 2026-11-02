@@ -383,6 +383,34 @@ namespace gpufft
         shared_memory[thread.shared_address1] = a1 * b1;
     }
 
+    // FFNT input of a low ring kernel: value x of row y is the fold
+    // f_x + i f_(x + N) of the 2N real values of polynomial y, times
+    // twist_table[x] (N = 2^N_power, the FFT size). real_address is the
+    // address of f_x.
+    template <typename T>
+    __device__ __forceinline__ void
+    LowRingLoadFoldTwist(const LowRingThread& thread, COMPLEX<T>* shared_memory,
+                         const T* polynomial_in, location_t real_address,
+                         const COMPLEX<T>* twist_table, int N_power)
+    {
+        const location_t x =
+            location_t(thread.shared_address0) & ((1 << N_power) - 1);
+
+        T real_part1 = polynomial_in[real_address];
+        T imaginary_part1 = polynomial_in[real_address + (1 << N_power)];
+        COMPLEX<T> part1(real_part1, imaginary_part1); // fold
+        part1 = part1 * twist_table[x]; // twist
+
+        T real_part2 = polynomial_in[real_address + thread.half_n];
+        T imaginary_part2 =
+            polynomial_in[real_address + thread.half_n + (1 << N_power)];
+        COMPLEX<T> part2(real_part2, imaginary_part2); // fold
+        part2 = part2 * twist_table[x + thread.half_n]; // twist
+
+        shared_memory[thread.shared_address0] = part1;
+        shared_memory[thread.shared_address1] = part2;
+    }
+
     // ---------------- Execute ----------------
 
     struct CooleyTukey
@@ -601,9 +629,32 @@ namespace gpufft
         __syncthreads();
     }
 
-    // Forward FFT of every row of a low ring kernel. The first level only
-    // reads the thread's own entries, so the load needs no barrier; rows
-    // narrower than a warp run all levels within the warp. Ends with a block
+    // Levels of every row of a low ring kernel with decreasing butterfly
+    // distance N/2, N/4, ..., 1. The first level only reads the thread's own
+    // entries, so the load needs no barrier; rows narrower than a warp run
+    // all levels within the warp. Ends with a block barrier.
+    template <typename Butterfly, int LogN, typename T, typename Roots>
+    __device__ __forceinline__ void
+    LowRingDecreasingExecute(COMPLEX<T>* shared_memory,
+                             const COMPLEX<T>* root_table, Roots roots)
+    {
+        DecreasingStageExecute<Butterfly>(
+            LowRingExecuteThread(), shared_memory, root_table, roots, LogN - 1,
+            LogN, false, (LogN > 6) ? LogN - 6 : 0, (LogN > 6) ? 6 : LogN);
+    }
+
+    // Levels of every row of a low ring kernel with increasing butterfly
+    // distance 1, 2, ..., N/2. Ends with a block barrier.
+    template <typename Butterfly, int LogN, typename T, typename Roots>
+    __device__ __forceinline__ void
+    LowRingIncreasingExecute(COMPLEX<T>* shared_memory,
+                             const COMPLEX<T>* root_table, Roots roots)
+    {
+        IncreasingStageExecute<Butterfly>(LowRingExecuteThread(), shared_memory,
+                                          root_table, roots, 0, LogN);
+    }
+
+    // Forward FFT of every row of a low ring kernel. Ends with a block
     // barrier.
     template <int LogN, typename T>
     __device__ __forceinline__ void
@@ -611,10 +662,9 @@ namespace gpufft
                           const COMPLEX<T>* root_of_unity_table,
                           bool reduction_poly_check)
     {
-        DecreasingStageExecute<CooleyTukey>(
-            LowRingExecuteThread(), shared_memory, root_of_unity_table,
-            PolyRoots<false>{reduction_poly_check, LogN - 1, 1}, LogN - 1, LogN,
-            false, (LogN > 6) ? LogN - 6 : 0, (LogN > 6) ? 6 : LogN);
+        LowRingDecreasingExecute<CooleyTukey, LogN>(
+            shared_memory, root_of_unity_table,
+            PolyRoots<false>{reduction_poly_check, LogN - 1, 1});
     }
 
     // Inverse FFT of every row of a low ring kernel, without the scaling by
@@ -625,11 +675,33 @@ namespace gpufft
                           const COMPLEX<T>* inverse_root_of_unity_table,
                           bool reduction_poly_check)
     {
-        IncreasingStageExecute<GentlemanSande>(
-            LowRingExecuteThread(), shared_memory, inverse_root_of_unity_table,
+        LowRingIncreasingExecute<GentlemanSande, LogN>(
+            shared_memory, inverse_root_of_unity_table,
             PolyRoots<true>{reduction_poly_check, 0,
-                            (location_t) 1 << (LogN - 1)},
-            0, LogN);
+                            (location_t) 1 << (LogN - 1)});
+    }
+
+    // Forward Special FFT of every row of a low ring kernel. Ends with a
+    // block barrier.
+    template <int LogN, typename T>
+    __device__ __forceinline__ void
+    SpecialForwardLowRingExecute(COMPLEX<T>* shared_memory,
+                                 const COMPLEX<T>* root_table)
+    {
+        LowRingIncreasingExecute<CooleyTukey, LogN>(shared_memory, root_table,
+                                                    SpecialRoots<true>{1});
+    }
+
+    // Inverse Special FFT of every row of a low ring kernel, without the
+    // scaling by n_inverse. Ends with a block barrier.
+    template <int LogN, typename T>
+    __device__ __forceinline__ void
+    SpecialInverseLowRingExecute(COMPLEX<T>* shared_memory,
+                                 const COMPLEX<T>* root_table)
+    {
+        LowRingDecreasingExecute<GentlemanSande, LogN>(
+            shared_memory, root_table,
+            SpecialRoots<false>{(location_t) 1 << (LogN - 1)});
     }
 
     // ---------------- Store ----------------
@@ -738,6 +810,37 @@ namespace gpufft
                 (shared_memory[thread.shared_address0] * n_inverse).real();
             output[thread.global_address + thread.half_n] =
                 (shared_memory[thread.shared_address1] * n_inverse).real();
+        }
+    }
+
+    // FFNT output of a low ring kernel: times n_inverse, untwist, then
+    // unfold to the 2N real values of the polynomial (N = 2^N_power).
+    template <typename T>
+    __device__ __forceinline__ void LowRingStoreUntwistUnfold(
+        const LowRingThread& thread, const COMPLEX<T>* shared_memory,
+        T* polynomial_out, location_t real_address,
+        const COMPLEX<T>* untwist_table, COMPLEX<T> n_inverse, int N_power)
+    {
+        if (thread.active)
+        {
+            const location_t x =
+                location_t(thread.shared_address0) & ((1 << N_power) - 1);
+
+            COMPLEX<T> part1 =
+                shared_memory[thread.shared_address0] * n_inverse;
+            COMPLEX<T> part2 =
+                shared_memory[thread.shared_address1] * n_inverse;
+
+            part1 = part1 * untwist_table[x]; // untwist
+            part2 = part2 * untwist_table[x + thread.half_n]; // untwist
+
+            // unfold
+            polynomial_out[real_address] = part1.real();
+            polynomial_out[real_address + (1 << N_power)] = part1.imag();
+
+            polynomial_out[real_address + thread.half_n] = part2.real();
+            polynomial_out[real_address + thread.half_n + (1 << N_power)] =
+                part2.imag();
         }
     }
 

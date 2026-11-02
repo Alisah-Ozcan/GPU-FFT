@@ -26,8 +26,8 @@ namespace
 
     // Smallest and largest log2 sizes of the host API.
     const int kMinLogN = 1;
-    const int kMinSpecialLogN = 11;
-    const int kMinFFNTLogN = 12;
+    const int kMinSpecialLogN = 1;
+    const int kMinFFNTLogN = 2;
 
     // Largest size with a full CPU reference; the huge suite checks the sizes
     // above it.
@@ -617,7 +617,11 @@ namespace
             for (int logl = kMinSpecialLogN; logl <= max_logn_; logl++)
             {
                 for (type dir : kDirections)
+                {
                     special_case(report, logl, dir, batch_for(logl));
+                    if (logl <= kLowRingMaxLogN)
+                        special_case(report, logl, dir, low_ring_batch(logl));
+                }
                 special_round_trip(report, logl, batch_for(logl));
             }
             return report.finish();
@@ -749,6 +753,14 @@ namespace
                 ffnt_case(report, logn, FORWARD, false, batch_for(logn));
                 ffnt_case(report, logn, INVERSE, false, batch_for(logn));
                 ffnt_case(report, logn, INVERSE, true, batch_for(logn));
+                // The FFT of the folded values has size 2^(logn - 1).
+                if (logn - 1 <= kLowRingMaxLogN)
+                {
+                    ffnt_case(report, logn, FORWARD, false,
+                              low_ring_batch(logn - 1));
+                    ffnt_case(report, logn, INVERSE, true,
+                              low_ring_batch(logn - 1));
+                }
             }
             return report.finish();
         }
@@ -904,12 +916,10 @@ namespace
                                [&] { GPU_Special_FFT(c, c, cfg(logn), 1); });
             }
 
-            // Non-positive, above the grid limit, and batch * N >= 2^31.
-            const int batches[][2] = {{kMinFFNTLogN, 0},
-                                      {kMinFFNTLogN, -1},
-                                      {kMinFFNTLogN, 65536},
-                                      {24, 128},
-                                      {kMaxLogN, 8}};
+            // Non-positive, above the grid limit of the stage kernels (2^12
+            // has stage kernels for every transform), and batch * N >= 2^31.
+            const int batches[][2] = {
+                {12, 0}, {12, -1}, {12, 65536}, {24, 128}, {kMaxLogN, 8}};
             for (const auto& entry : batches)
             {
                 const int logn = entry[0];
