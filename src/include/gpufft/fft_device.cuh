@@ -161,15 +161,12 @@ namespace gpufft
 
     // The distance between the two values of a thread is
     // 2^(N_power - level - 1), with level = logm for the forward and k for
-    // the inverse transform.
+    // the inverse transform. (idx_x, idx_y) is the thread of the block and
+    // (block_x, block_y) the block of the stage grid.
     __device__ __forceinline__ StageThread
-    StageThreadState(int level, int outer_iteration_count, int N_power)
+    StageThreadState(int level, int outer_iteration_count, int N_power,
+                     int idx_x, int idx_y, int block_x, int block_y)
     {
-        const int idx_x = threadIdx.x;
-        const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
-
         const location_t offset = 1 << (N_power - level - 1);
 
         const location_t local_address =
@@ -190,6 +187,18 @@ namespace gpufft
 
         return StageThread{offset, local_address, omega_address,
                            shared_address};
+    }
+
+    __device__ __forceinline__ StageThread
+    StageThreadState(int level, int outer_iteration_count, int N_power)
+    {
+        const int idx_x = threadIdx.x;
+        const int idx_y = threadIdx.y;
+        const int block_x = blockIdx.x;
+        const int block_y = blockIdx.y;
+
+        return StageThreadState(level, outer_iteration_count, N_power, idx_x,
+                                idx_y, block_x, block_y);
     }
 
     // Global address of the thread's first value in the polynomial of the
@@ -362,7 +371,7 @@ namespace gpufft
     {
         template <typename T>
         __device__ __forceinline__ static void
-        apply(COMPLEX<T>& U, COMPLEX<T>& V, COMPLEX<T>& root)
+        apply(COMPLEX<T>& U, COMPLEX<T>& V, const COMPLEX<T>& root)
         {
             CooleyTukeyUnit(U, V, root);
         }
@@ -372,7 +381,7 @@ namespace gpufft
     {
         template <typename T>
         __device__ __forceinline__ static void
-        apply(COMPLEX<T>& U, COMPLEX<T>& V, COMPLEX<T>& root)
+        apply(COMPLEX<T>& U, COMPLEX<T>& V, const COMPLEX<T>& root)
         {
             GentlemanSandeUnit(U, V, root);
         }
@@ -462,9 +471,9 @@ namespace gpufft
     template <typename Butterfly, typename T, typename Roots>
     __device__ __forceinline__ void
     DecreasingStageExecute(const StageThread& thread, COMPLEX<T>* shared_memory,
-                           COMPLEX<T>* root_table, Roots roots, int t_start,
-                           int loops, bool not_last_kernel, int sync_levels,
-                           int warp_levels = 6)
+                           const COMPLEX<T>* root_table, Roots roots,
+                           int t_start, int loops, bool not_last_kernel,
+                           int sync_levels, int warp_levels = 6)
     {
         const location_t shared_addresss = thread.shared_address;
         const location_t omega_addresss = thread.omega_address;
@@ -541,8 +550,8 @@ namespace gpufft
     template <typename Butterfly, typename T, typename Roots>
     __device__ __forceinline__ void
     IncreasingStageExecute(const StageThread& thread, COMPLEX<T>* shared_memory,
-                           COMPLEX<T>* root_table, Roots roots, int t_start,
-                           int loops)
+                           const COMPLEX<T>* root_table, Roots roots,
+                           int t_start, int loops)
     {
         const location_t shared_addresss = thread.shared_address;
         const location_t omega_addresss = thread.omega_address;
@@ -581,7 +590,7 @@ namespace gpufft
     template <int LogN, typename T>
     __device__ __forceinline__ void
     ForwardLowRingExecute(COMPLEX<T>* shared_memory,
-                          COMPLEX<T>* root_of_unity_table,
+                          const COMPLEX<T>* root_of_unity_table,
                           bool reduction_poly_check)
     {
         DecreasingStageExecute<CooleyTukey>(
@@ -595,7 +604,7 @@ namespace gpufft
     template <int LogN, typename T>
     __device__ __forceinline__ void
     InverseLowRingExecute(COMPLEX<T>* shared_memory,
-                          COMPLEX<T>* inverse_root_of_unity_table,
+                          const COMPLEX<T>* inverse_root_of_unity_table,
                           bool reduction_poly_check)
     {
         IncreasingStageExecute<GentlemanSande>(
