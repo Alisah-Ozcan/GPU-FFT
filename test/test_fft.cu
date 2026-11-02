@@ -23,9 +23,13 @@ namespace
     const type kDirections[] = {FORWARD, INVERSE};
 
     // Smallest and largest log2 sizes of the host API.
-    const int kMinLogN = 12;
+    const int kMinLogN = 1;
     const int kMinSpecialLogN = 11;
+    const int kMinFFNTLogN = 12;
     const int kMaxLogN = 24;
+
+    // Sizes up to 2^9 transform 2^(9 - logn) polynomials per block.
+    const int kLowRingMaxLogN = 9;
 
     std::string case_name(const std::string& variant, type dir, int logn,
                           ReductionPolynomial poly, int batch)
@@ -49,6 +53,12 @@ namespace
     int batch_for(int logn)
     {
         return std::min(37, std::max(1, (1 << 20) >> logn));
+    }
+
+    // More than two blocks of the low ring kernel, the last one not full.
+    int low_ring_batch(int logn)
+    {
+        return 2 * (1 << (kLowRingMaxLogN - logn)) + 3;
     }
 
     void sync()
@@ -184,7 +194,16 @@ namespace
             for (int logn = kMinLogN; logn <= max_logn_; logn++)
                 for (ReductionPolynomial poly : kPolys)
                     for (type dir : kDirections)
+                    {
                         c2c_case(report, logn, dir, poly, batch_for(logn));
+                        if (logn <= kLowRingMaxLogN)
+                            c2c_case(report, logn, dir, poly,
+                                     low_ring_batch(logn));
+                        // The low ring kernels take batches above the grid
+                        // limit of the stage kernels.
+                        if (logn == kMinLogN)
+                            c2c_case(report, logn, dir, poly, 65537);
+                    }
             return report.finish();
         }
 
@@ -261,7 +280,12 @@ namespace
             for (int logn = kMinLogN; logn <= max_logn_; logn++)
                 for (ReductionPolynomial poly : kPolys)
                     for (type dir : kDirections)
+                    {
                         real_case(report, logn, dir, poly, batch_for(logn));
+                        if (logn <= kLowRingMaxLogN)
+                            real_case(report, logn, dir, poly,
+                                      low_ring_batch(logn));
+                    }
             return report.finish();
         }
 
@@ -332,8 +356,13 @@ namespace
             for (int logn = kMinLogN; logn <= max_logn_; logn++)
                 for (ReductionPolynomial poly : kPolys)
                     for (bool real_output : {false, true})
+                    {
                         mult_case(report, logn, poly, real_output,
                                   batch_for(logn));
+                        if (logn <= kLowRingMaxLogN)
+                            mult_case(report, logn, poly, real_output,
+                                      low_ring_batch(logn));
+                    }
             return report.finish();
         }
 
@@ -486,7 +515,8 @@ namespace
                 for (ReductionPolynomial poly : kPolys)
                     for (bool real_io : {false, true})
                         poly_mult_fft_case(report, logn, poly, real_io, 3);
-                poly_mult_ffnt_case(report, logn, 3);
+                if (logn >= kMinFFNTLogN)
+                    poly_mult_ffnt_case(report, logn, 3);
             }
             return report.finish();
         }
@@ -697,7 +727,7 @@ namespace
         int ffnt()
         {
             TestReport report(suite_name("ffnt"));
-            for (int logn = kMinLogN; logn <= max_logn_; logn++)
+            for (int logn = kMinFFNTLogN; logn <= max_logn_; logn++)
             {
                 ffnt_case(report, logn, FORWARD, false, batch_for(logn));
                 ffnt_case(report, logn, INVERSE, false, batch_for(logn));
@@ -743,7 +773,10 @@ namespace
                                [&] { GPU_FFT(c, c, cfg(logn), 1, false); });
                 expect_invalid(report, "real" + n,
                                [&] { GPU_FFT(r, c, c, cfg(logn), 1, false); });
-                expect_invalid(report, "ffnt" + n,
+            }
+            for (int logn : {kMinFFNTLogN - 1, kMaxLogN + 1})
+            {
+                expect_invalid(report, "ffnt logn=" + std::to_string(logn),
                                [&]
                                { GPU_FFNT(r, c, c, c, cfg(logn), 1, false); });
             }
@@ -754,8 +787,10 @@ namespace
             }
 
             // Non-positive, above the grid limit, and batch * N >= 2^31.
-            const int batches[][2] = {
-                {kMinLogN, 0}, {kMinLogN, -1}, {kMinLogN, 65536}, {24, 128}};
+            const int batches[][2] = {{kMinFFNTLogN, 0},
+                                      {kMinFFNTLogN, -1},
+                                      {kMinFFNTLogN, 65536},
+                                      {24, 128}};
             for (const auto& entry : batches)
             {
                 const int logn = entry[0];

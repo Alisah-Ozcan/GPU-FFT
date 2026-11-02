@@ -175,7 +175,7 @@ namespace
 
 NVBENCH_BENCH_TYPES(fft, NVBENCH_TYPE_AXES(DataTypes))
     .set_type_axes_names({"Data"})
-    .add_int64_axis("LogN", nvbench::range(12, 24))
+    .add_int64_axis("LogN", nvbench::range(1, 24))
     .add_string_axis("Workload", {"single", "bulk"})
     .add_string_axis("Direction", {"forward", "inverse"})
     .add_string_axis("Poly", {"X^N-1", "X^N+1"})

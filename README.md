@@ -90,7 +90,7 @@ ctest --test-dir build --output-on-failure
 #### Benchmarks
 
 Benchmarks use [nvbench](https://github.com/NVIDIA/nvbench), which requires CMake >= 3.30.4. `benchmark_fft` runs every benchmark for both 32-bit and 64-bit data, with one polynomial (`single`) or about 2^22 values (`bulk`; one polynomial from `LogN` 22):
-- `fft`: `GPU_FFT` for `LogN` 12–24, forward and inverse, X^N-1 and X^N+1, complex or real input/output.
+- `fft`: `GPU_FFT` for `LogN` 1–24, forward and inverse, X^N-1 and X^N+1, complex or real input/output.
 - `special_fft`: `GPU_Special_FFT` for `LogN` 11–24 (the number of slots).
 - `ffnt`: `GPU_FFNT` for `LogN` 12–24 (the number of real coefficients).
 - `poly_mult`: polynomial multiplication, the forward transform of both operands and the inverse transform with the fused pointwise product, with `GPU_FFT` (`c2c`, `real`) or `GPU_FFNT` (`ffnt`).

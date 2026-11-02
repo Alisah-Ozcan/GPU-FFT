@@ -17,8 +17,9 @@
 
 namespace gpufft
 {
-    static constexpr int kMinLogN = 12;
+    static constexpr int kMinLogN = 1;
     static constexpr int kMinSpecialLogN = 11;
+    static constexpr int kMinFFNTLogN = 12;
     static constexpr int kMaxLogN = 24;
 
     static void check_n_power(int n_power, int min_log_n)
@@ -29,12 +30,14 @@ namespace gpufft
         }
     }
 
-    // The batch is the third grid dimension, and kernels compute global
-    // memory offsets (including the second operand of a multiplication) with
-    // 32-bit integers.
+    // The batch is the third grid dimension of the stage kernels (the low
+    // ring kernels spread it over grid x), and kernels compute global memory
+    // offsets (including the second operand of a multiplication) with 32-bit
+    // integers.
     static void check_batch_size(int n_power, int batch_size)
     {
-        if (batch_size <= 0 || batch_size > 65535)
+        if (batch_size <= 0 ||
+            (n_power > kLowRingMaxLogN && batch_size > 65535))
         {
             throw std::invalid_argument("Invalid batch_size!");
         }
@@ -56,6 +59,47 @@ namespace gpufft
     };
 
     // ---------------- Kernels ----------------
+
+    // Forward FFT of size 2^LogN <= 2^kLowRingMaxLogN in one kernel, of
+    // blockDim.y polynomials per block (see LowRingThread): reads
+    // polynomial_in (complex or real) and writes polynomial_out.
+    template <int LogN, typename In, typename T>
+    __global__ void ForwardLowRing(const In* polynomial_in,
+                                   COMPLEX<T>* polynomial_out,
+                                   COMPLEX<T>* root_of_unity_table,
+                                   bool reduction_poly_check, int batch_size)
+    {
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const LowRingThread thread = LowRingThreadState(LogN, batch_size);
+
+        LowRingLoad(thread, shared_memory, polynomial_in);
+        ForwardLowRingExecute<LogN>(shared_memory, root_of_unity_table,
+                                    reduction_poly_check);
+        LowRingStore(thread, shared_memory, polynomial_out);
+    }
+
+    // Inverse FFT of size 2^LogN <= 2^kLowRingMaxLogN in one kernel: reads
+    // polynomial_in, times the second operand at polynomial_in + offset2 if
+    // multiplication is set, and writes polynomial_out (complex or real)
+    // times n_inverse.
+    template <int LogN, typename T, typename Out>
+    __global__ void
+    InverseLowRing(const COMPLEX<T>* polynomial_in, Out* polynomial_out,
+                   COMPLEX<T>* inverse_root_of_unity_table,
+                   COMPLEX<T> n_inverse, bool multiplication, int offset2,
+                   bool reduction_poly_check, int batch_size)
+    {
+        COMPLEX<T>* shared_memory = stage_shared<T>();
+        const LowRingThread thread = LowRingThreadState(LogN, batch_size);
+
+        if (multiplication)
+            LowRingLoadProduct(thread, shared_memory, polynomial_in, offset2);
+        else
+            LowRingLoad(thread, shared_memory, polynomial_in);
+        InverseLowRingExecute<LogN>(shared_memory, inverse_root_of_unity_table,
+                                    reduction_poly_check);
+        LowRingStoreScaled(thread, shared_memory, polynomial_out, n_inverse);
+    }
 
     // Stage I of a forward FFT: reads polynomial_in (complex or real) and
     // writes polynomial_out.
@@ -280,33 +324,60 @@ namespace gpufft
         GPUFFT_CUDA_CHECK(cudaGetLastError());
     }
 
-    // The first stage reads polynomial_in; every stage writes
-    // polynomial_out and the later stages read it in place.
+    // Launches the low ring kernel of size 2^LogN: 256 threads, which
+    // transform 2^(kLowRingMaxLogN - LogN) polynomials per block.
+    template <typename T, int LogN, typename Kernel, typename... Args>
+    void launch_low_ring(Kernel kernel, int batch_size, cudaStream_t stream,
+                         Args... args)
+    {
+        constexpr int polys_per_block = 1 << (kLowRingMaxLogN - LogN);
+
+        kernel<<<(batch_size + polys_per_block - 1) / polys_per_block,
+                 dim3(1 << (LogN - 1), polys_per_block),
+                 (size_t(polys_per_block) << LogN) * sizeof(COMPLEX<T>),
+                 stream>>>(args...);
+        GPUFFT_CUDA_CHECK(cudaGetLastError());
+    }
+
+    // Small sizes run in the low ring kernel. Otherwise the first stage reads
+    // polynomial_in; every stage writes polynomial_out and the later stages
+    // read it in place.
     template <int LogN, typename In, typename T>
     void forward_stages(const In* polynomial_in, COMPLEX<T>* polynomial_out,
                         COMPLEX<T>* root_of_unity_table,
                         bool reduction_poly_check, int batch_size,
                         cudaStream_t stream)
     {
-        for_each_stage<T, FORWARD, LogN>(
-            [&](auto stage)
-            {
-                constexpr int I = decltype(stage)::value;
-                if constexpr (I == 0)
-                    launch_stage<T, FORWARD, LogN, I>(
-                        ForwardStage<LogN, I, In, T>, batch_size, stream,
-                        polynomial_in, polynomial_out, root_of_unity_table,
-                        reduction_poly_check);
-                else
-                    launch_stage<T, FORWARD, LogN, I>(
-                        ForwardStage<LogN, I, COMPLEX<T>, T>, batch_size,
-                        stream, polynomial_out, polynomial_out,
-                        root_of_unity_table, reduction_poly_check);
-            });
+        if constexpr (LogN <= kLowRingMaxLogN)
+        {
+            launch_low_ring<T, LogN>(ForwardLowRing<LogN, In, T>, batch_size,
+                                     stream, polynomial_in, polynomial_out,
+                                     root_of_unity_table, reduction_poly_check,
+                                     batch_size);
+        }
+        else
+        {
+            for_each_stage<T, FORWARD, LogN>(
+                [&](auto stage)
+                {
+                    constexpr int I = decltype(stage)::value;
+                    if constexpr (I == 0)
+                        launch_stage<T, FORWARD, LogN, I>(
+                            ForwardStage<LogN, I, In, T>, batch_size, stream,
+                            polynomial_in, polynomial_out, root_of_unity_table,
+                            reduction_poly_check);
+                    else
+                        launch_stage<T, FORWARD, LogN, I>(
+                            ForwardStage<LogN, I, COMPLEX<T>, T>, batch_size,
+                            stream, polynomial_out, polynomial_out,
+                            root_of_unity_table, reduction_poly_check);
+                });
+        }
     }
 
-    // Every stage reads polynomial_in; the last one writes polynomial_out,
-    // the others write polynomial_in in place.
+    // Small sizes run in the low ring kernel. Otherwise every stage reads
+    // polynomial_in; the last one writes polynomial_out, the others write
+    // polynomial_in in place.
     template <int LogN, typename T, typename Out>
     void inverse_stages(COMPLEX<T>* polynomial_in, Out* polynomial_out,
                         COMPLEX<T>* inverse_root_of_unity_table,
@@ -314,25 +385,35 @@ namespace gpufft
                         bool reduction_poly_check, int batch_size,
                         cudaStream_t stream)
     {
-        constexpr int count = stage_plan<T>(INVERSE, LogN).count;
+        if constexpr (LogN <= kLowRingMaxLogN)
+        {
+            launch_low_ring<T, LogN>(
+                InverseLowRing<LogN, T, Out>, batch_size, stream, polynomial_in,
+                polynomial_out, inverse_root_of_unity_table, n_inverse,
+                multiplication, offset2, reduction_poly_check, batch_size);
+        }
+        else
+        {
+            constexpr int count = stage_plan<T>(INVERSE, LogN).count;
 
-        for_each_stage<T, INVERSE, LogN>(
-            [&](auto stage)
-            {
-                constexpr int I = decltype(stage)::value;
-                if constexpr (I + 1 == count)
-                    launch_stage<T, INVERSE, LogN, I>(
-                        InverseStage<LogN, I, T, Out>, batch_size, stream,
-                        polynomial_in, polynomial_out,
-                        inverse_root_of_unity_table, n_inverse, multiplication,
-                        offset2, reduction_poly_check);
-                else
-                    launch_stage<T, INVERSE, LogN, I>(
-                        InverseStage<LogN, I, T, COMPLEX<T>>, batch_size,
-                        stream, polynomial_in, polynomial_in,
-                        inverse_root_of_unity_table, n_inverse, multiplication,
-                        offset2, reduction_poly_check);
-            });
+            for_each_stage<T, INVERSE, LogN>(
+                [&](auto stage)
+                {
+                    constexpr int I = decltype(stage)::value;
+                    if constexpr (I + 1 == count)
+                        launch_stage<T, INVERSE, LogN, I>(
+                            InverseStage<LogN, I, T, Out>, batch_size, stream,
+                            polynomial_in, polynomial_out,
+                            inverse_root_of_unity_table, n_inverse,
+                            multiplication, offset2, reduction_poly_check);
+                    else
+                        launch_stage<T, INVERSE, LogN, I>(
+                            InverseStage<LogN, I, T, COMPLEX<T>>, batch_size,
+                            stream, polynomial_in, polynomial_in,
+                            inverse_root_of_unity_table, n_inverse,
+                            multiplication, offset2, reduction_poly_check);
+                });
+        }
     }
 
     // ---------------- Host API ----------------
@@ -435,11 +516,11 @@ namespace gpufft
              COMPLEX<T>* root_of_unity_table, fft_configuration<T> cfg,
              int batch_size, bool multiplication)
     {
-        check_n_power(cfg.n_power, kMinLogN);
+        check_n_power(cfg.n_power, kMinFFNTLogN);
         check_batch_size(cfg.n_power, batch_size);
 
         // The FFT of the folded values has size 2^(n_power - 1).
-        dispatch_log_n<kMinLogN - 1, kMaxLogN - 1>(
+        dispatch_log_n<kMinFFNTLogN - 1, kMaxLogN - 1>(
             cfg.n_power - 1,
             [&](auto log_n)
             {
