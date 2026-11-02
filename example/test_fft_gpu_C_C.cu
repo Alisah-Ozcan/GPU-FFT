@@ -8,6 +8,7 @@
 
 #include "gpufft/fft.cuh"
 #include "gpufft/fft_cpu.cuh"
+#include "gpufft/twiddles.cuh"
 #include "example_util.cuh"
 
 using namespace std;
@@ -40,8 +41,6 @@ template <typename T> bool run(int logn, int batch)
         }
     }
 
-    FFT<T> fft_generator(n);
-
     COMPLEX<T>* InOut_Datas;
     GPUFFT_CUDA_CHECK(
         cudaMalloc(&InOut_Datas, vec_GPU.size() * sizeof(COMPLEX<T>)));
@@ -49,7 +48,9 @@ template <typename T> bool run(int logn, int batch)
                                  vec_GPU.size() * sizeof(COMPLEX<T>),
                                  cudaMemcpyHostToDevice));
 
-    vector<COMPLEX<T>> reverse_table = fft_generator.ReverseRootTable();
+    // Root tables of an FFT of 2n values (X^N - 1): n entries each.
+    vector<COMPLEX<T>> reverse_table =
+        make_fft_twiddles_host<T>(logn + 1, X_N_minus, FORWARD);
     COMPLEX<T>* Root_Table_Device;
     GPUFFT_CUDA_CHECK(cudaMalloc(&Root_Table_Device, n * sizeof(COMPLEX<T>)));
     GPUFFT_CUDA_CHECK(cudaMemcpy(Root_Table_Device, reverse_table.data(),
@@ -57,7 +58,7 @@ template <typename T> bool run(int logn, int batch)
                                  cudaMemcpyHostToDevice));
 
     vector<COMPLEX<T>> inverse_reverse_table =
-        fft_generator.InverseReverseRootTable();
+        make_fft_twiddles_host<T>(logn + 1, X_N_minus, INVERSE);
     COMPLEX<T>* Inverse_Root_Table_Device;
     GPUFFT_CUDA_CHECK(
         cudaMalloc(&Inverse_Root_Table_Device, n * sizeof(COMPLEX<T>)));
@@ -77,7 +78,7 @@ template <typename T> bool run(int logn, int batch)
     cfg_ifft.n_power = logn + 1;
     cfg_ifft.fft_type = INVERSE;
     cfg_ifft.reduction_poly = ReductionPolynomial::X_N_minus;
-    cfg_ifft.mod_inverse = COMPLEX<T>(fft_generator.n_inverse, 0.0);
+    cfg_ifft.mod_inverse = COMPLEX<T>(1.0 / (2 * n), 0.0);
     cfg_ifft.stream = 0;
 
     GPU_FFT(InOut_Datas, Inverse_Root_Table_Device, cfg_ifft, batch, true);

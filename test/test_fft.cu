@@ -7,11 +7,13 @@
 // references.
 //
 // Usage: fft_tests --bits <32|64> --suite <name|all> --max-logn <N>
-// Suites: c2c, real, mult, poly_mult, special, ffnt, validation, large
+// Suites: c2c, real, mult, poly_mult, special, ffnt, twiddles, validation,
+// large
 
 #include <cstring>
 #include <functional>
 
+#include "gpufft/twiddles.cuh"
 #include "test_util.cuh"
 
 using namespace gpufft_test;
@@ -26,10 +28,10 @@ namespace
     const int kMinLogN = 1;
     const int kMinSpecialLogN = 11;
     const int kMinFFNTLogN = 12;
-    const int kMaxLogN = 24;
 
-    // Sizes up to 2^9 transform 2^(9 - logn) polynomials per block.
-    const int kLowRingMaxLogN = 9;
+    // The largest size is 2^kMaxLogN; sizes up to 2^kLowRingMaxLogN
+    // transform 2^(kLowRingMaxLogN - logn) polynomials per block (both from
+    // fft_device.cuh).
 
     std::string case_name(const std::string& variant, type dir, int logn,
                           ReductionPolynomial poly, int batch)
@@ -59,6 +61,11 @@ namespace
     int low_ring_batch(int logn)
     {
         return 2 * (1 << (kLowRingMaxLogN - logn)) + 3;
+    }
+
+    std::string dir_name(type dir)
+    {
+        return dir == FORWARD ? " fft" : " ifft";
     }
 
     void sync()
@@ -95,6 +102,8 @@ namespace
                 return special();
             if (suite == "ffnt")
                 return ffnt();
+            if (suite == "twiddles")
+                return twiddles();
             if (suite == "validation")
                 return validation();
             if (suite == "large")
@@ -102,8 +111,9 @@ namespace
             if (suite == "all")
             {
                 int result = 0;
-                for (const char* s : {"c2c", "real", "mult", "poly_mult",
-                                      "special", "ffnt", "validation", "large"})
+                for (const char* s :
+                     {"c2c", "real", "mult", "poly_mult", "special", "ffnt",
+                      "twiddles", "validation", "large"})
                 {
                     result |= run(s);
                 }
@@ -537,7 +547,8 @@ namespace
                     std::vector<COMPLEX<T>> input =
                         to_t<T>(random_complex(rng_, l * batch));
                     DeviceBuffer<COMPLEX<T>> data(input);
-                    DeviceBuffer<COMPLEX<T>> roots(to_t<T>(table));
+                    DeviceBuffer<COMPLEX<T>> roots(
+                        make_special_fft_twiddles_host<T>(logl, dir));
                     GPU_Special_FFT(data.get(), roots.get(),
                                     config(logl, dir,
                                            ReductionPolynomial::X_N_plus,
@@ -663,9 +674,9 @@ namespace
                             DeviceBuffer<T> data(input);
                             DeviceBuffer<COMPLEX<T>> temp(half * batch);
                             DeviceBuffer<COMPLEX<T>> roots(
-                                generator.ReverseRootTable_ffnt());
+                                make_ffnt_twiddles_host<T>(logn, FORWARD));
                             DeviceBuffer<COMPLEX<T>> twist(
-                                generator.twist_table_ffnt());
+                                make_ffnt_twist_host<T>(logn, FORWARD));
                             GPU_FFNT(data.get(), temp.get(), twist.get(),
                                      roots.get(),
                                      config(logn, FORWARD,
@@ -692,9 +703,9 @@ namespace
                             DeviceBuffer<COMPLEX<T>> temp(input);
                             DeviceBuffer<T> data(n * batch);
                             DeviceBuffer<COMPLEX<T>> roots(
-                                generator.InverseReverseRootTable_ffnt());
+                                make_ffnt_twiddles_host<T>(logn, INVERSE));
                             DeviceBuffer<COMPLEX<T>> untwist(
-                                generator.untwist_table_ffnt());
+                                make_ffnt_twist_host<T>(logn, INVERSE));
                             GPU_FFNT(data.get(), temp.get(), untwist.get(),
                                      roots.get(),
                                      config(logn, INVERSE,
@@ -733,6 +744,107 @@ namespace
                 ffnt_case(report, logn, INVERSE, false, batch_for(logn));
                 ffnt_case(report, logn, INVERSE, true, batch_for(logn));
             }
+            return report.finish();
+        }
+
+        // ---------------- Root table helpers (twiddles.cuh) ----------------
+
+        // The host and device tables against the tables of the references,
+        // up to rounding: the host results depend on whether the compiler
+        // merges sin and cos into sincos, which can differ by one ulp.
+        template <typename MakeHost, typename MakeDevice>
+        void twiddle_case(TestReport& report, const std::string& name,
+                          const std::vector<COMPLEX<T>>& reference,
+                          MakeHost make_host, MakeDevice make_device)
+        {
+            guarded(report, name,
+                    [&]
+                    {
+                        report.check_close(name + " host", make_host(),
+                                           to_ref(reference),
+                                           kSingle ? 1e-7 : 4e-16);
+                        DeviceBuffer<COMPLEX<T>> table(reference.size());
+                        make_device(table.get());
+                        sync();
+                        report.check_close(name + " device", table.download(),
+                                           to_ref(reference),
+                                           kSingle ? 1e-7 : 1e-15);
+                    });
+        }
+
+        int twiddles()
+        {
+            TestReport report(suite_name("twiddles"));
+            for (int logn = kMinLogN; logn <= max_logn_; logn++)
+            {
+                const std::string n = " logn=" + std::to_string(logn);
+                for (ReductionPolynomial poly : kPolys)
+                    for (type dir : kDirections)
+                    {
+                        twiddle_case(
+                            report,
+                            "fft" + dir_name(dir) + n +
+                                (poly == X_N_minus ? " X^N-1" : " X^N+1"),
+                            to_t<T>(table_for(logn, poly, dir == INVERSE)),
+                            [&] {
+                                return make_fft_twiddles_host<T>(logn, poly,
+                                                                 dir);
+                            },
+                            [&](COMPLEX<T>* table)
+                            { make_fft_twiddles(table, logn, poly, dir); });
+                    }
+                for (type dir : kDirections)
+                {
+                    twiddle_case(
+                        report, "special" + dir_name(dir) + n,
+                        to_t<T>(special_table(logn, dir == INVERSE)),
+                        [&] {
+                            return make_special_fft_twiddles_host<T>(logn, dir);
+                        },
+                        [&](COMPLEX<T>* table)
+                        { make_special_fft_twiddles(table, logn, dir); });
+                }
+                if (logn < 2)
+                    continue;
+                // The FFNT class holds 2^(logn - 1) roots, of which GPU_FFNT
+                // reads the first half.
+                FFNT<T> generator(1 << logn);
+                const size_t roots = size_t(1) << (logn - 2);
+                for (type dir : kDirections)
+                {
+                    std::vector<COMPLEX<T>> reference =
+                        (dir == FORWARD)
+                            ? generator.ReverseRootTable_ffnt()
+                            : generator.InverseReverseRootTable_ffnt();
+                    reference.resize(roots);
+                    twiddle_case(
+                        report, "ffnt" + dir_name(dir) + n, reference,
+                        [&] { return make_ffnt_twiddles_host<T>(logn, dir); },
+                        [&](COMPLEX<T>* table)
+                        { make_ffnt_twiddles(table, logn, dir); });
+                    twiddle_case(
+                        report, "ffnt twist" + dir_name(dir) + n,
+                        (dir == FORWARD) ? generator.twist_table_ffnt()
+                                         : generator.untwist_table_ffnt(),
+                        [&] { return make_ffnt_twist_host<T>(logn, dir); },
+                        [&](COMPLEX<T>* table)
+                        { make_ffnt_twist(table, logn, dir); });
+                }
+            }
+
+            for (int logn : {0, kMaxLogN + 1})
+            {
+                const std::string n = " logn=" + std::to_string(logn);
+                expect_invalid(
+                    report, "fft twiddles" + n,
+                    [&]
+                    { make_fft_twiddles_host<T>(logn, X_N_plus, FORWARD); });
+                expect_invalid(
+                    report, "special twiddles" + n,
+                    [&] { make_special_fft_twiddles_host<T>(logn, FORWARD); });
+            }
+            expect_invalid(report, "ffnt twist logn=1",
+                           [&] { make_ffnt_twist_host<T>(1, FORWARD); });
             return report.finish();
         }
 

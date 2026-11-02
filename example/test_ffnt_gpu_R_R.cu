@@ -8,6 +8,7 @@
 
 #include "gpufft/fft.cuh"
 #include "gpufft/fft_cpu.cuh"
+#include "gpufft/twiddles.cuh"
 #include "example_util.cuh"
 
 using namespace std;
@@ -40,8 +41,6 @@ template <typename T> bool run(int logn, int batch)
         }
     }
 
-    FFNT<T> fft_generator(n);
-
     COMPLEX<T>* Temp_Datas;
     GPUFFT_CUDA_CHECK(
         cudaMalloc(&Temp_Datas, 2 * batch * (n >> 1) * sizeof(COMPLEX<T>)));
@@ -52,24 +51,26 @@ template <typename T> bool run(int logn, int batch)
                                  poly_f.size() * sizeof(T),
                                  cudaMemcpyHostToDevice));
 
-    // Copies a table of n / 2 entries to the GPU.
+    // Copies a table to the GPU.
     auto upload_table = [&](const vector<COMPLEX<T>>& table)
     {
         COMPLEX<T>* device;
-        GPUFFT_CUDA_CHECK(cudaMalloc(&device, (n >> 1) * sizeof(COMPLEX<T>)));
+        GPUFFT_CUDA_CHECK(
+            cudaMalloc(&device, table.size() * sizeof(COMPLEX<T>)));
         GPUFFT_CUDA_CHECK(cudaMemcpy(device, table.data(),
-                                     (n >> 1) * sizeof(COMPLEX<T>),
+                                     table.size() * sizeof(COMPLEX<T>),
                                      cudaMemcpyHostToDevice));
         return device;
     };
+    // Root tables of n / 4 entries, twist tables of n / 2 entries.
     COMPLEX<T>* Root_Table_Device =
-        upload_table(fft_generator.ReverseRootTable_ffnt());
+        upload_table(make_ffnt_twiddles_host<T>(logn, FORWARD));
     COMPLEX<T>* Inverse_Root_Table_Device =
-        upload_table(fft_generator.InverseReverseRootTable_ffnt());
+        upload_table(make_ffnt_twiddles_host<T>(logn, INVERSE));
     COMPLEX<T>* Twist_Table_Device =
-        upload_table(fft_generator.twist_table_ffnt());
+        upload_table(make_ffnt_twist_host<T>(logn, FORWARD));
     COMPLEX<T>* Untwist_Table_Device =
-        upload_table(fft_generator.untwist_table_ffnt());
+        upload_table(make_ffnt_twist_host<T>(logn, INVERSE));
 
     fft_configuration<T> cfg_fft{};
     cfg_fft.n_power = logn;

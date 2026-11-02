@@ -32,7 +32,8 @@ set_target_properties(fft_device_tests PROPERTIES
 add_test(NAME fft_device COMMAND fft_device_tests)
 
 foreach(bits 32 64)
-    foreach(suite c2c real mult poly_mult special ffnt validation large)
+    foreach(suite c2c real mult poly_mult special ffnt twiddles validation
+                  large)
         add_test(
             NAME fft_${bits}_${suite}
             COMMAND fft_tests --bits ${bits} --suite ${suite}

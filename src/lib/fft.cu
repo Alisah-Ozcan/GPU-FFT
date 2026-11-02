@@ -20,7 +20,6 @@ namespace gpufft
     static constexpr int kMinLogN = 1;
     static constexpr int kMinSpecialLogN = 11;
     static constexpr int kMinFFNTLogN = 12;
-    static constexpr int kMaxLogN = 24;
 
     static void check_n_power(int n_power, int min_log_n)
     {

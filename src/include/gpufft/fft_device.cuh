@@ -43,6 +43,24 @@ namespace gpufft
     // LowRingThread); 2^10 runs in a single stage kernel of 512 threads.
     constexpr int kLowRingMaxLogN = 9;
 
+    // Largest FFT size, 2^kMaxLogN.
+    constexpr int kMaxLogN = 24;
+
+    constexpr bool is_power_of_two(int n)
+    {
+        return n > 0 && (n & (n - 1)) == 0;
+    }
+
+    constexpr int log2_of_power_of_two(int n)
+    {
+        int log = 0;
+        while ((1 << log) < n)
+        {
+            log++;
+        }
+        return log;
+    }
+
     constexpr int kMaxStages = 5;
 
     // Threads per stage kernel of an FFT of size 2^log_n.
@@ -79,11 +97,7 @@ namespace gpufft
             threads = default_stage_threads(log_n);
         }
 
-        int s = 0;
-        while ((1 << s) < threads)
-        {
-            s++;
-        }
+        const int s = log2_of_power_of_two(threads);
 
         StagePlan plan = {};
         const int early_levels = log_n - (s + 1);

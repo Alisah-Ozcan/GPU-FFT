@@ -10,6 +10,7 @@
 #include "complex.cuh"
 #include "fft.cuh"
 #include "fft_device.cuh"
+#include "twiddles.cuh"
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
@@ -44,25 +45,10 @@ namespace gpufft
         static constexpr FFTOperator op = Op;
     };
 
-    constexpr bool is_power_of_two(int n)
-    {
-        return n > 0 && (n & (n - 1)) == 0;
-    }
-
-    constexpr int log2_of_power_of_two(int n)
-    {
-        int log = 0;
-        while ((1 << log) < n)
-        {
-            log++;
-        }
-        return log;
-    }
-
     // FFT size N (number of complex values of one polynomial).
     template <int N> struct Size : FFTOperatorBase<FFTOperator::Size>
     {
-        static_assert(is_power_of_two(N) && N >= 2 && N <= (1 << 24),
+        static_assert(is_power_of_two(N) && N >= 2 && N <= (1 << kMaxLogN),
                       "Size must be a power of two in [2, 2^24]");
         static constexpr int value = N;
         static constexpr int log_value = log2_of_power_of_two(N);
@@ -614,30 +600,11 @@ namespace gpufft
         }
     };
 
-    // table[i] = exp(+-pi i bitrev(i) / 2^log_size) for i < 2^log_size, with
-    // the minus sign for the inverse table.
-    template <typename T>
-    __global__ void TwiddleTableKernel(COMPLEX<T>* table, int log_size,
-                                       bool inverse)
-    {
-        const int i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (i >= (1 << log_size))
-        {
-            return;
-        }
-        const unsigned reversed =
-            (log_size == 0) ? 0u : __brev(unsigned(i)) >> (32 - log_size);
-        double sine;
-        double cosine;
-        sincospi(double(reversed) / double(1 << log_size), &sine, &cosine);
-        table[i] = COMPLEX<T>(cosine, inverse ? -sine : sine);
-    }
-
-    // Root table of an FFT of size N, built on the host or by a kernel. The
-    // forward table holds the powers of exp(2 pi i / N) (X^N - 1) or of
-    // exp(pi i / N) (X^N + 1) in bit-reversed order; the inverse table holds
-    // their conjugates. Descriptions without ReductionPoly have no root
-    // table.
+    // Root table of an FFT of size N, built on the host or by a kernel (see
+    // make_fft_twiddles_host in twiddles.cuh). The forward table holds the
+    // powers of exp(2 pi i / N) (X^N - 1) or of exp(pi i / N) (X^N + 1) in
+    // bit-reversed order; the inverse table holds their conjugates.
+    // Descriptions without ReductionPoly have no root table.
     template <typename T, int N, type D, bool HasReductionPoly,
               ReductionPolynomial R>
     struct FFTRootTable
@@ -654,20 +621,7 @@ namespace gpufft
         // precision and rounded to Precision.
         static std::vector<COMPLEX<T>> make_twiddles_host()
         {
-            std::vector<COMPLEX<T>> table(twiddle_table_size);
-            for (int i = 0; i < twiddle_table_size; i++)
-            {
-                int reversed = 0;
-                for (int b = 0; b < log_table_size; b++)
-                {
-                    reversed |= ((i >> b) & 1) << (log_table_size - 1 - b);
-                }
-                const double angle = M_PI * reversed / twiddle_table_size;
-                const double sine = std::sin(angle);
-                table[i] =
-                    COMPLEX<T>(std::cos(angle), (D == FORWARD) ? sine : -sine);
-            }
-            return table;
+            return make_fft_twiddles_host<T>(log2_of_power_of_two(N), R, D);
         }
 
         // The same table, written by a kernel to table, which holds
@@ -676,16 +630,8 @@ namespace gpufft
         // and table is ready when it finishes.
         static void make_twiddles(COMPLEX<T>* table, cudaStream_t stream = 0)
         {
-            constexpr int threads = 256;
-            const int blocks = (twiddle_table_size + threads - 1) / threads;
-            TwiddleTableKernel<<<blocks, threads, 0, stream>>>(
-                table, log_table_size, D == INVERSE);
-            GPUFFT_CUDA_CHECK(cudaGetLastError());
+            make_fft_twiddles(table, log2_of_power_of_two(N), R, D, stream);
         }
-
-      private:
-        static constexpr int log_table_size =
-            log2_of_power_of_two(twiddle_table_size);
     };
 
     // The kernels of FFT::launch: the whole transform in a single kernel

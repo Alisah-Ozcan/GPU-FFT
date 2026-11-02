@@ -8,43 +8,22 @@
 #include <random>
 
 #include "gpufft/fft.cuh"
+#include "gpufft/twiddles.cuh"
 #include "example_util.cuh"
 
 using namespace std;
 using namespace gpufft;
 using namespace gpufft_example;
 
-// Root table of GPU_Special_FFT for l = 2^logl slots (the CKKS canonical
-// embedding): entry m / 2 + j of the stage with sub-arrays of m elements is
-// Psi[(5^j mod 4m) * (l / m)] with Psi[k] = exp(pi i k / (2l)). The inverse
-// table holds the conjugates.
-template <typename T>
-vector<COMPLEX<T>> special_fft_table(int logl, bool inverse)
-{
-    const int l = 1 << logl;
-    vector<COMPLEX<T>> table(l, COMPLEX<T>(0.0, 0.0));
-    for (int logm = 1; logm <= logl; logm++)
-    {
-        const int m = 1 << logm;
-        long long rotation = 1; // 5^j mod 4l
-        for (int j = 0; j < m / 2; j++)
-        {
-            const long long k = (rotation % (4 * m)) * (l / m);
-            const double angle = M_PI * k / (2.0 * l);
-            table[m / 2 + j] = COMPLEX<T>(
-                std::cos(angle), inverse ? -std::sin(angle) : std::sin(angle));
-            rotation = (5 * rotation) % (4 * l);
-        }
-    }
-    return table;
-}
-
 // The FFT-like algorithm of the GPU_Special_FFT comment (without the bit
 // reversal of the input), in double precision.
 vector<COMPLEX<double>> special_fft_cpu(vector<COMPLEX<double>> w, int logl)
 {
     const int l = 1 << logl;
-    vector<COMPLEX<double>> table = special_fft_table<double>(logl, false);
+    // Entry m / 2 + j of the level with sub-arrays of m values is
+    // exp(pi i (5^j mod 4m) / (2m)).
+    vector<COMPLEX<double>> table =
+        make_special_fft_twiddles_host<double>(logl, FORWARD);
     for (int m = 2; m <= l; m <<= 1)
     {
         for (int i = 0; i < l; i += m)
@@ -101,8 +80,9 @@ template <typename T> bool run(int logl, int batch)
                                  slots.size() * sizeof(COMPLEX<T>),
                                  cudaMemcpyHostToDevice));
 
-    vector<COMPLEX<T>> table = special_fft_table<T>(logl, false);
-    vector<COMPLEX<T>> inverse_table = special_fft_table<T>(logl, true);
+    vector<COMPLEX<T>> table = make_special_fft_twiddles_host<T>(logl, FORWARD);
+    vector<COMPLEX<T>> inverse_table =
+        make_special_fft_twiddles_host<T>(logl, INVERSE);
     COMPLEX<T>* Table_Device;
     COMPLEX<T>* Inverse_Table_Device;
     GPUFFT_CUDA_CHECK(cudaMalloc(&Table_Device, l * sizeof(COMPLEX<T>)));

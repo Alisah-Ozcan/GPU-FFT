@@ -246,6 +246,10 @@ namespace
       private:
         static constexpr double kTwiddleTolerance =
             std::is_same<T, Float32>::value ? 1e-7 : 1e-15;
+        // The host tables can differ from the references by one ulp,
+        // depending on whether the compiler merges sin and cos into sincos.
+        static constexpr double kHostTwiddleTolerance =
+            std::is_same<T, Float32>::value ? 1e-7 : 4e-16;
 
         std::string suite_name(const std::string& suite) const
         {
@@ -303,8 +307,8 @@ namespace
                             (R == X_N_minus)
                                 ? cyclic_table(LogN, D == INVERSE)
                                 : negacyclic_table(LogN, D == INVERSE);
-                        report.check_equal(name + " host", host,
-                                           to_t<T>(reference));
+                        report.check_close(name + " host", host, reference,
+                                           kHostTwiddleTolerance);
 
                         DeviceBuffer<COMPLEX<T>> table(FFT::twiddle_table_size);
                         FFT::make_twiddles(table.get());
