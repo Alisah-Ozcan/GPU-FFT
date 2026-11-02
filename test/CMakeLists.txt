@@ -17,6 +17,20 @@ set_target_properties(fft_tests PROPERTIES
     CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES}
 )
 
+add_executable(descriptor_tests test_descriptor.cu)
+target_link_libraries(descriptor_tests PRIVATE fft CUDA::cudart)
+set_target_properties(descriptor_tests PROPERTIES
+    CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES}
+)
+add_test(NAME descriptor COMMAND descriptor_tests)
+
+add_executable(fft_device_tests test_fft_device.cu)
+target_link_libraries(fft_device_tests PRIVATE fft CUDA::cudart)
+set_target_properties(fft_device_tests PROPERTIES
+    CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES}
+)
+add_test(NAME fft_device COMMAND fft_device_tests)
+
 foreach(bits 32 64)
     foreach(suite c2c real mult poly_mult special ffnt validation large)
         add_test(

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <random>
 #include <stdexcept>
@@ -406,6 +407,39 @@ namespace gpufft_test
                                std::to_string(first) + ": got " +
                                std::to_string(static_cast<double>(got[first])) +
                                ", expected " + std::to_string(expected[first]));
+            }
+        }
+
+        // Compares bit for bit, e.g. with the result of the host API.
+        template <typename V>
+        void check_equal(const std::string& name, const std::vector<V>& got,
+                         const std::vector<V>& expected)
+        {
+            cases_++;
+            if (got.size() != expected.size())
+            {
+                fail(name, "size mismatch");
+                return;
+            }
+            size_t mismatches = 0;
+            size_t first = 0;
+            for (size_t i = 0; i < got.size(); i++)
+            {
+                if (std::memcmp(&got[i], &expected[i], sizeof(V)) != 0)
+                {
+                    if (mismatches == 0)
+                    {
+                        first = i;
+                    }
+                    mismatches++;
+                }
+            }
+            if (mismatches > 0)
+            {
+                fail(name, std::to_string(mismatches) + " of " +
+                               std::to_string(got.size()) +
+                               " values differ, first at index " +
+                               std::to_string(first));
             }
         }
 
