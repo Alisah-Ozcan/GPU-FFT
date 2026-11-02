@@ -32,7 +32,7 @@ static_assert(std::is_same<decltype(BlockDim<512>() + Left()),
                                           Direction<INVERSE>>>::value);
 
 static_assert(Size<4096>::value == 4096 && Size<4096>::log_value == 12);
-static_assert(Size<2>::log_value == 1 && Size<(1 << 24)>::log_value == 24);
+static_assert(Size<2>::log_value == 1 && Size<(1 << 28)>::log_value == 28);
 static_assert(BlockDim<256, 2>::x == 256 && BlockDim<256, 2>::y == 2 &&
               BlockDim<256, 2>::z == 1);
 
@@ -163,6 +163,16 @@ static_assert(same_dim(Large128::stage<3>::grid(2), 65536, 1, 2));
 static_assert(LargeInverse128::stage<0>::swap_grid_axes);
 static_assert(!FwdFFT::stage<1>::swap_grid_axes);
 
+// With the default 256 threads the last forward stage swaps the grid axes
+// from 2^25: 5 + 5 + 6 levels, then 9 levels in 2^16 groups.
+using Fwd25 = decltype(Size<(1 << 25)>() + Direction<FORWARD>() +
+                       Precision<Float64>() + Block());
+static_assert(Fwd25::num_stages == 4 && Fwd25::stage<3>::swap_grid_axes);
+static_assert(same_dim(Fwd25::stage<3>::grid(1), 65536, 1, 1));
+static_assert(!decltype(Size<(1 << 24)>() + Direction<FORWARD>() +
+                        Precision<Float64>() +
+                        Block())::stage<2>::swap_grid_axes);
+
 // 2^11 with 1024 threads fits a single kernel; 2^10 with 128 threads does
 // not.
 static_assert(decltype(Size<2048>() + Direction<INVERSE>() +
@@ -182,6 +192,8 @@ static_assert(stages_with<20, 128> == 3 && stages_with<20, 256> == 3 &&
               stages_with<20, 512> == 3 && stages_with<20, 1024> == 2);
 static_assert(stages_with<24, 128> == 4 && stages_with<24, 256> == 4 &&
               stages_with<24, 512> == 3 && stages_with<24, 1024> == 3);
+static_assert(stages_with<28, 128> == 5 && stages_with<28, 256> == 4 &&
+              stages_with<28, 512> == 4 && stages_with<28, 1024> == 3);
 
 // The default plans are the plans of 256 threads, and of 512 threads for
 // 2^10.
@@ -197,7 +209,7 @@ constexpr bool same_config(const KernelConfig& a, const KernelConfig& b)
 
 template <typename T> constexpr bool default_plans_use_threads()
 {
-    for (int log_n = 10; log_n <= 24; log_n++)
+    for (int log_n = 10; log_n <= 28; log_n++)
     {
         const int threads = (log_n == 10) ? 512 : 256;
         const type directions[] = {FORWARD, INVERSE};
@@ -228,7 +240,7 @@ template <typename T> constexpr bool plans_cover_all_levels()
 {
     for (int threads = 128; threads <= 1024; threads *= 2)
     {
-        for (int log_n = 10; log_n <= 24; log_n++)
+        for (int log_n = 10; log_n <= 28; log_n++)
         {
             if (threads > (1 << log_n) / 2)
             {
@@ -269,7 +281,7 @@ template <typename T> constexpr bool last_forward_matches_first_inverse()
     for (int threads = 0; threads <= 1024;
          threads = threads ? 2 * threads : 128)
     {
-        for (int log_n = 11; log_n <= 24; log_n++)
+        for (int log_n = 11; log_n <= 28; log_n++)
         {
             if (threads > (1 << log_n) / 2)
             {

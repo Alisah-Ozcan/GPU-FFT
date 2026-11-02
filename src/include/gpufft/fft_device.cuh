@@ -44,7 +44,7 @@ namespace gpufft
     constexpr int kLowRingMaxLogN = 9;
 
     // Largest FFT size, 2^kMaxLogN.
-    constexpr int kMaxLogN = 24;
+    constexpr int kMaxLogN = 28;
 
     constexpr bool is_power_of_two(int n)
     {
@@ -203,13 +203,17 @@ namespace gpufft
                            shared_address};
     }
 
+    // The state of the thread in its stage kernel. With SwapGridAxes the
+    // kernel swaps the roles of blockIdx.x and blockIdx.y, because its groups
+    // do not fit grid y (see stage_plan).
+    template <bool SwapGridAxes = false>
     __device__ __forceinline__ StageThread
     StageThreadState(int level, int outer_iteration_count, int N_power)
     {
         const int idx_x = threadIdx.x;
         const int idx_y = threadIdx.y;
-        const int block_x = blockIdx.x;
-        const int block_y = blockIdx.y;
+        const int block_x = SwapGridAxes ? blockIdx.y : blockIdx.x;
+        const int block_y = SwapGridAxes ? blockIdx.x : blockIdx.y;
 
         return StageThreadState(level, outer_iteration_count, N_power, idx_x,
                                 idx_y, block_x, block_y);

@@ -175,7 +175,7 @@ namespace
 
 NVBENCH_BENCH_TYPES(fft, NVBENCH_TYPE_AXES(DataTypes))
     .set_type_axes_names({"Data"})
-    .add_int64_axis("LogN", nvbench::range(1, 24))
+    .add_int64_axis("LogN", nvbench::range(1, 28))
     .add_string_axis("Workload", {"single", "bulk"})
     .add_string_axis("Direction", {"forward", "inverse"})
     .add_string_axis("Poly", {"X^N-1", "X^N+1"})
@@ -184,14 +184,14 @@ NVBENCH_BENCH_TYPES(fft, NVBENCH_TYPE_AXES(DataTypes))
 
 NVBENCH_BENCH_TYPES(special_fft, NVBENCH_TYPE_AXES(DataTypes))
     .set_type_axes_names({"Data"})
-    .add_int64_axis("LogN", nvbench::range(11, 24))
+    .add_int64_axis("LogN", nvbench::range(11, 28))
     .add_string_axis("Workload", {"single", "bulk"})
     .add_string_axis("Direction", {"forward", "inverse"})
     .set_timeout(1);
 
 NVBENCH_BENCH_TYPES(ffnt, NVBENCH_TYPE_AXES(DataTypes))
     .set_type_axes_names({"Data"})
-    .add_int64_axis("LogN", nvbench::range(12, 24))
+    .add_int64_axis("LogN", nvbench::range(12, 28))
     .add_string_axis("Workload", {"single", "bulk"})
     .add_string_axis("Direction", {"forward", "inverse"})
     .set_timeout(1);

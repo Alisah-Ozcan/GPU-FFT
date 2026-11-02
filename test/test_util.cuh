@@ -290,6 +290,37 @@ namespace gpufft_test
         }
     }
 
+    // sum over r < n of x(r) * exp(sign * pi i (e0 + r * step) / n), with
+    // the exponents reduced modulo 2n. The root advances by multiplication
+    // and is recomputed exactly every 256 terms.
+    template <typename X>
+    Ref direct_sum(X x, size_t n, unsigned long long e0,
+                   unsigned long long step, double sign)
+    {
+        const unsigned long long period = 2 * n;
+        auto root = [&](unsigned long long e)
+        {
+            const double angle = M_PI * double(e % period) / double(n);
+            return Ref(std::cos(angle), sign * std::sin(angle));
+        };
+        step %= period;
+        const Ref step_root = root(step);
+        unsigned long long e = e0 % period;
+        Ref sum(0.0, 0.0);
+        Ref w;
+        for (size_t r = 0; r < n; r++)
+        {
+            if ((r & 255) == 0)
+            {
+                w = root(e);
+            }
+            sum = sum + x(r) * w;
+            w = w * step_root;
+            e = (e + step) % period;
+        }
+        return sum;
+    }
+
     // a * b mod X^n - 1 (cyclic) or X^n + 1 (negacyclic), exact.
     inline std::vector<long long> schoolbook(const std::vector<int>& a,
                                              const std::vector<int>& b,

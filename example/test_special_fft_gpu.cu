@@ -60,7 +60,7 @@ double relative_error(const vector<COMPLEX<T>>& got,
 // the CPU algorithm, followed by the inverse, checked against the input.
 template <typename T> bool run(int logl, int batch)
 {
-    check_logn(logl, 11, 24);
+    check_logn(logl, 11, 28);
     const int l = 1 << logl;
     const double tolerance = sizeof(T) == 4 ? 1e-5 : 1e-12;
 

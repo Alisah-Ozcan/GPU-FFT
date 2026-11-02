@@ -33,15 +33,17 @@ add_test(NAME fft_device COMMAND fft_device_tests)
 
 foreach(bits 32 64)
     foreach(suite c2c real mult poly_mult special ffnt twiddles validation
-                  large)
+                  large huge)
         add_test(
             NAME fft_${bits}_${suite}
             COMMAND fft_tests --bits ${bits} --suite ${suite}
                     --max-logn ${GPUFFT_TEST_MAX_LOGN}
         )
     endforeach()
-    # The large suites use about 2 GB of GPU memory each; run them one at a
-    # time.
+    # The large suites use about 2 GB of GPU memory each, the huge suites
+    # (sizes 2^25 to 2^28, label "huge") up to 12 GB; run them one at a time.
     set_tests_properties(fft_${bits}_large PROPERTIES
         RESOURCE_LOCK fft_large)
+    set_tests_properties(fft_${bits}_huge PROPERTIES
+        RESOURCE_LOCK fft_large LABELS huge)
 endforeach()

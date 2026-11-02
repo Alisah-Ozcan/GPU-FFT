@@ -49,7 +49,7 @@ namespace gpufft
     template <int N> struct Size : FFTOperatorBase<FFTOperator::Size>
     {
         static_assert(is_power_of_two(N) && N >= 2 && N <= (1 << kMaxLogN),
-                      "Size must be a power of two in [2, 2^24]");
+                      "Size must be a power of two in [2, 2^28]");
         static constexpr int value = N;
         static constexpr int log_value = log2_of_power_of_two(N);
     };
@@ -372,11 +372,9 @@ namespace gpufft
       private:
         __device__ __forceinline__ static StageThread thread()
         {
-            return StageThreadState(D == FORWARD ? config.logm : config.k,
-                                    config.outer_iteration_count, LogN,
-                                    threadIdx.x, threadIdx.y,
-                                    swap_grid_axes ? blockIdx.y : blockIdx.x,
-                                    swap_grid_axes ? blockIdx.x : blockIdx.y);
+            return StageThreadState<swap_grid_axes>(
+                D == FORWARD ? config.logm : config.k,
+                config.outer_iteration_count, LogN);
         }
     };
 

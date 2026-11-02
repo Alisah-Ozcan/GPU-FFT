@@ -20,7 +20,7 @@ using namespace gpufft_example;
 // against the schoolbook product.
 template <typename T> bool run(int logn, int batch)
 {
-    check_logn(logn, 12, 24);
+    check_logn(logn, 12, 28);
     const int n = 1 << logn;
 
     std::mt19937 gen(0);

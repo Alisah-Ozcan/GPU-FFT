@@ -55,6 +55,8 @@ namespace gpufft
         static_assert(I >= 0 && I < plan.count, "Stage index out of range");
 
         static constexpr KernelConfig config = plan.stage[I];
+
+        static constexpr bool swap_grid_axes = plan.swap_grid_axes[I];
     };
 
     // ---------------- Kernels ----------------
@@ -107,11 +109,12 @@ namespace gpufft
     ForwardStage(const In* polynomial_in, COMPLEX<T>* polynomial_out,
                  COMPLEX<T>* root_of_unity_table, bool reduction_poly_check)
     {
-        constexpr KernelConfig k = StageConfig<T, FORWARD, LogN, I>::config;
+        using Config = StageConfig<T, FORWARD, LogN, I>;
+        constexpr KernelConfig k = Config::config;
 
         COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(k.logm, k.outer_iteration_count, LogN);
+        const StageThread thread = StageThreadState<Config::swap_grid_axes>(
+            k.logm, k.outer_iteration_count, LogN);
         const location_t global_address = poly_address(thread, LogN);
 
         StageLoad(thread, shared_memory, polynomial_in, global_address);
@@ -134,11 +137,12 @@ namespace gpufft
                  COMPLEX<T>* inverse_root_of_unity_table, COMPLEX<T> n_inverse,
                  bool multiplication, int offset2, bool reduction_poly_check)
     {
-        constexpr KernelConfig k = StageConfig<T, INVERSE, LogN, I>::config;
+        using Config = StageConfig<T, INVERSE, LogN, I>;
+        constexpr KernelConfig k = Config::config;
 
         COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(k.k, k.outer_iteration_count, LogN);
+        const StageThread thread = StageThreadState<Config::swap_grid_axes>(
+            k.k, k.outer_iteration_count, LogN);
         const location_t global_address = poly_address(thread, LogN);
 
         if (I == 0 && multiplication)
@@ -165,11 +169,12 @@ namespace gpufft
     __global__ void SpecialForwardStage(COMPLEX<T>* polynomial,
                                         COMPLEX<T>* inverse_root_of_unity_table)
     {
-        constexpr KernelConfig k = StageConfig<T, INVERSE, LogN, I>::config;
+        using Config = StageConfig<T, INVERSE, LogN, I>;
+        constexpr KernelConfig k = Config::config;
 
         COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(k.k, k.outer_iteration_count, LogN);
+        const StageThread thread = StageThreadState<Config::swap_grid_axes>(
+            k.k, k.outer_iteration_count, LogN);
         const location_t global_address = poly_address(thread, LogN);
 
         StageLoad(thread, shared_memory, polynomial, global_address);
@@ -188,11 +193,12 @@ namespace gpufft
                                         COMPLEX<T>* root_of_unity_table,
                                         COMPLEX<T> n_inverse)
     {
-        constexpr KernelConfig k = StageConfig<T, FORWARD, LogN, I>::config;
+        using Config = StageConfig<T, FORWARD, LogN, I>;
+        constexpr KernelConfig k = Config::config;
 
         COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(k.logm, k.outer_iteration_count, LogN);
+        const StageThread thread = StageThreadState<Config::swap_grid_axes>(
+            k.logm, k.outer_iteration_count, LogN);
         const location_t global_address = poly_address(thread, LogN);
 
         StageLoad(thread, shared_memory, polynomial, global_address);
@@ -217,11 +223,12 @@ namespace gpufft
                                      const COMPLEX<T>* twist_table,
                                      COMPLEX<T>* root_of_unity_table)
     {
-        constexpr KernelConfig k = StageConfig<T, FORWARD, LogN, I>::config;
+        using Config = StageConfig<T, FORWARD, LogN, I>;
+        constexpr KernelConfig k = Config::config;
 
         COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(k.logm, k.outer_iteration_count, LogN);
+        const StageThread thread = StageThreadState<Config::swap_grid_axes>(
+            k.logm, k.outer_iteration_count, LogN);
         const location_t global_address = poly_address(thread, LogN);
 
         if constexpr (I == 0)
@@ -248,11 +255,12 @@ namespace gpufft
                                      COMPLEX<T> n_inverse, bool multiplication,
                                      int offset2)
     {
-        constexpr KernelConfig k = StageConfig<T, INVERSE, LogN, I>::config;
+        using Config = StageConfig<T, INVERSE, LogN, I>;
+        constexpr KernelConfig k = Config::config;
 
         COMPLEX<T>* shared_memory = stage_shared<T>();
-        const StageThread thread =
-            StageThreadState(k.k, k.outer_iteration_count, LogN);
+        const StageThread thread = StageThreadState<Config::swap_grid_axes>(
+            k.k, k.outer_iteration_count, LogN);
         const location_t global_address = poly_address(thread, LogN);
 
         if (I == 0 && multiplication)

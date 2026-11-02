@@ -85,14 +85,15 @@ ctest --test-dir build --output-on-failure
 
 - `-DGPUFFT_TEST_MAX_LOGN=<N>` sets the largest size covered by the regular suites (default `20`).
 - The `large` suites cover the sizes above it, up to 2^24, with one polynomial each.
+- The `huge` suites (CTest label `huge`) cover 2^25 to 2^28: they compare random outputs with direct sums and check that the special FFT and the FFNT round trip. They need up to 12 GB of GPU memory and take several minutes; `ctest -LE huge` skips them.
 - A single suite can be run directly: `./build/bin/test/fft_tests --bits 64 --suite special --max-logn 16`
 
 #### Benchmarks
 
 Benchmarks use [nvbench](https://github.com/NVIDIA/nvbench), which requires CMake >= 3.30.4. `benchmark_fft` runs every benchmark for both 32-bit and 64-bit data, with one polynomial (`single`) or about 2^22 values (`bulk`; one polynomial from `LogN` 22):
-- `fft`: `GPU_FFT` for `LogN` 1–24, forward and inverse, X^N-1 and X^N+1, complex or real input/output.
-- `special_fft`: `GPU_Special_FFT` for `LogN` 11–24 (the number of slots).
-- `ffnt`: `GPU_FFNT` for `LogN` 12–24 (the number of real coefficients).
+- `fft`: `GPU_FFT` for `LogN` 1–28, forward and inverse, X^N-1 and X^N+1, complex or real input/output.
+- `special_fft`: `GPU_Special_FFT` for `LogN` 11–28 (the number of slots).
+- `ffnt`: `GPU_FFNT` for `LogN` 12–28 (the number of real coefficients).
 - `poly_mult`: polynomial multiplication, the forward transform of both operands and the inverse transform with the fused pointwise product, with `GPU_FFT` (`c2c`, `real`) or `GPU_FFNT` (`ffnt`).
 
 Configure + build:

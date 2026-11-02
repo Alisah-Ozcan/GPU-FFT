@@ -8,7 +8,7 @@
 //
 // Usage: fft_tests --bits <32|64> --suite <name|all> --max-logn <N>
 // Suites: c2c, real, mult, poly_mult, special, ffnt, twiddles, validation,
-// large
+// large, huge ("all" runs every suite but huge)
 
 #include <cstring>
 #include <functional>
@@ -28,6 +28,10 @@ namespace
     const int kMinLogN = 1;
     const int kMinSpecialLogN = 11;
     const int kMinFFNTLogN = 12;
+
+    // Largest size with a full CPU reference; the huge suite checks the sizes
+    // above it.
+    const int kMaxReferenceLogN = 24;
 
     // The largest size is 2^kMaxLogN; sizes up to 2^kLowRingMaxLogN
     // transform 2^(kLowRingMaxLogN - logn) polynomials per block (both from
@@ -84,7 +88,7 @@ namespace
     {
       public:
         explicit FFTTests(int max_logn)
-            : max_logn_(std::min(max_logn, kMaxLogN)), rng_(2026)
+            : max_logn_(std::min(max_logn, kMaxReferenceLogN)), rng_(2026)
         {
         }
 
@@ -108,6 +112,8 @@ namespace
                 return validation();
             if (suite == "large")
                 return large();
+            if (suite == "huge")
+                return huge();
             if (suite == "all")
             {
                 int result = 0;
@@ -902,7 +908,8 @@ namespace
             const int batches[][2] = {{kMinFFNTLogN, 0},
                                       {kMinFFNTLogN, -1},
                                       {kMinFFNTLogN, 65536},
-                                      {24, 128}};
+                                      {24, 128},
+                                      {kMaxLogN, 8}};
             for (const auto& entry : batches)
             {
                 const int logn = entry[0];
@@ -929,7 +936,7 @@ namespace
         int large()
         {
             TestReport report(suite_name("large"));
-            for (int logn = max_logn_ + 1; logn <= kMaxLogN; logn++)
+            for (int logn = max_logn_ + 1; logn <= kMaxReferenceLogN; logn++)
             {
                 for (ReductionPolynomial poly : kPolys)
                 {
@@ -944,6 +951,254 @@ namespace
                     special_case(report, logn, dir, 1);
                 ffnt_case(report, logn, FORWARD, false, 1);
                 ffnt_case(report, logn, INVERSE, true, 1);
+            }
+            return report.finish();
+        }
+
+        // ---------------- Sizes above 2^kMaxReferenceLogN ----------------
+
+        // Random values of T, generated directly to save host memory.
+        std::vector<COMPLEX<T>> random_values(size_t count)
+        {
+            std::uniform_real_distribution<double> dist(-1.0, 1.0);
+            std::vector<COMPLEX<T>> values(count);
+            for (auto& v : values)
+            {
+                const T re = static_cast<T>(dist(rng_));
+                v = COMPLEX<T>(re, static_cast<T>(dist(rng_)));
+            }
+            return values;
+        }
+
+        static Ref to_ref_value(const COMPLEX<T>& v)
+        {
+            return Ref(static_cast<double>(v.real()),
+                       static_cast<double>(v.imag()));
+        }
+
+        // Output k of the forward GPU_FFT of the polynomial at a + offset:
+        // sum_j a_j w^(j r) with w = exp(2 pi i / N) (X^N - 1), or
+        // sum_j a_j psi^(j (2r + 1)) with psi = exp(pi i / N) (X^N + 1),
+        // r = bitrev(k).
+        static Ref forward_value(const std::vector<COMPLEX<T>>& a,
+                                 size_t offset, int logn,
+                                 ReductionPolynomial poly, size_t k)
+        {
+            const unsigned long long r = bitreverse(int(k), logn);
+            return direct_sum([&](size_t j)
+                              { return to_ref_value(a[offset + j]); },
+                              size_t(1) << logn, 0,
+                              (poly == X_N_minus) ? 2 * r : 2 * r + 1, 1.0);
+        }
+
+        // Output j of the inverse GPU_FFT of the spectrum at a + offset,
+        // without n_inverse: the conjugate sums over r = bitrev(k).
+        static Ref inverse_value(const std::vector<COMPLEX<T>>& a,
+                                 size_t offset, int logn,
+                                 ReductionPolynomial poly, size_t j)
+        {
+            return direct_sum(
+                [&](size_t r)
+                { return to_ref_value(a[offset + bitreverse(int(r), logn)]); },
+                size_t(1) << logn, (poly == X_N_minus) ? 0 : j, 2 * j, -1.0);
+        }
+
+        static constexpr double kHugeTolerance = kSingle ? 2e-6 : 1e-11;
+        static constexpr int kSpotChecks = 2;
+
+        // GPU_FFT against direct sums at kSpotChecks random outputs of every
+        // polynomial; the root table is built on the GPU.
+        void huge_case(TestReport& report, int logn, type dir,
+                       ReductionPolynomial poly, bool real_io, bool mult,
+                       int batch)
+        {
+            const std::string name =
+                case_name(mult ? "huge mult" : (real_io ? "huge real" : "huge"),
+                          dir, logn, poly, batch);
+            guarded(
+                report, name,
+                [&]
+                {
+                    const size_t n = size_t(1) << logn;
+                    const double n_inverse = 1.0 / n;
+                    std::vector<COMPLEX<T>> input =
+                        random_values((mult ? 2 : 1) * n * batch);
+                    if (real_io && dir == FORWARD)
+                        for (auto& v : input)
+                            v = COMPLEX<T>(v.real(), T(0));
+                    DeviceBuffer<COMPLEX<T>> roots(
+                        fft_twiddle_table_size(logn, poly));
+                    make_fft_twiddles(roots.get(), logn, poly, dir);
+                    const fft_configuration<T> cfg =
+                        config(logn, dir, poly, n_inverse);
+
+                    std::vector<COMPLEX<T>> got;
+                    {
+                        DeviceBuffer<COMPLEX<T>> data(input);
+                        if (real_io)
+                        {
+                            DeviceBuffer<T> real(n * batch);
+                            if (dir == FORWARD)
+                            {
+                                std::vector<T> values(n * batch);
+                                for (size_t i = 0; i < values.size(); i++)
+                                    values[i] = input[i].real();
+                                real.upload(values);
+                            }
+                            GPU_FFT(real.get(), data.get(), roots.get(), cfg,
+                                    batch, mult);
+                            sync();
+                            if (dir == FORWARD)
+                            {
+                                got = data.download();
+                            }
+                            else
+                            {
+                                std::vector<T> values = real.download();
+                                got.resize(values.size());
+                                for (size_t i = 0; i < values.size(); i++)
+                                    got[i] = COMPLEX<T>(values[i], T(0));
+                            }
+                        }
+                        else
+                        {
+                            GPU_FFT(data.get(), roots.get(), cfg, batch, mult);
+                            sync();
+                            got = data.download();
+                        }
+                    }
+
+                    if (mult)
+                    {
+                        // The inverse of the product A * B.
+                        for (size_t i = 0; i < n * batch; i++)
+                            input[i] = input[i] * input[n * batch + i];
+                    }
+                    std::uniform_int_distribution<size_t> index(0, n - 1);
+                    for (int b = 0; b < batch; b++)
+                    {
+                        std::vector<COMPLEX<T>> values;
+                        std::vector<Ref> expected;
+                        for (int c = 0; c < kSpotChecks; c++)
+                        {
+                            const size_t k = index(rng_);
+                            Ref value =
+                                (dir == FORWARD)
+                                    ? forward_value(input, b * n, logn, poly, k)
+                                    : inverse_value(input, b * n, logn, poly,
+                                                    k) *
+                                          Ref(n_inverse, 0.0);
+                            if (real_io && dir == INVERSE)
+                                value = Ref(value.real(), 0.0);
+                            values.push_back(got[b * n + k]);
+                            expected.push_back(value);
+                        }
+                        report.check_close(name + " poly=" + std::to_string(b),
+                                           values, expected, kHugeTolerance);
+                    }
+                });
+        }
+
+        // Inverse after forward is the identity.
+        void huge_round_trip(TestReport& report, const std::string& name,
+                             const std::vector<COMPLEX<T>>& input,
+                             const std::vector<COMPLEX<T>>& output)
+        {
+            double error = 0.0;
+            double scale = 0.0;
+            for (size_t i = 0; i < input.size(); i++)
+            {
+                error = std::max(
+                    error,
+                    std::hypot(double(output[i].real()) - input[i].real(),
+                               double(output[i].imag()) - input[i].imag()));
+                scale = std::max(scale, std::hypot(double(input[i].real()),
+                                                   double(input[i].imag())));
+            }
+            report.expect(error <= kHugeTolerance * scale, name,
+                          "round trip error " + std::to_string(error / scale));
+        }
+
+        void huge_special(TestReport& report, int logl)
+        {
+            const std::string name =
+                "huge special round trip logl=" + std::to_string(logl);
+            guarded(report, name,
+                    [&]
+                    {
+                        const size_t l = size_t(1) << logl;
+                        const std::vector<COMPLEX<T>> input = random_values(l);
+                        DeviceBuffer<COMPLEX<T>> data(input);
+                        DeviceBuffer<COMPLEX<T>> roots(l);
+                        make_special_fft_twiddles(roots.get(), logl, FORWARD);
+                        GPU_Special_FFT(data.get(), roots.get(),
+                                        config(logl, FORWARD, X_N_plus, 0.0),
+                                        1);
+                        make_special_fft_twiddles(roots.get(), logl, INVERSE);
+                        GPU_Special_FFT(
+                            data.get(), roots.get(),
+                            config(logl, INVERSE, X_N_plus, 1.0 / l), 1);
+                        sync();
+                        huge_round_trip(report, name, input, data.download());
+                    });
+        }
+
+        void huge_ffnt(TestReport& report, int logn)
+        {
+            const std::string name =
+                "huge ffnt round trip logn=" + std::to_string(logn);
+            guarded(
+                report, name,
+                [&]
+                {
+                    const size_t n = size_t(1) << logn;
+                    std::vector<COMPLEX<T>> input = random_values(n);
+                    std::vector<T> real(n);
+                    for (size_t i = 0; i < n; i++)
+                    {
+                        real[i] = input[i].real();
+                        input[i] = COMPLEX<T>(real[i], T(0));
+                    }
+                    DeviceBuffer<T> data(real);
+                    DeviceBuffer<COMPLEX<T>> temp(n / 2);
+                    DeviceBuffer<COMPLEX<T>> roots(n / 4);
+                    DeviceBuffer<COMPLEX<T>> twist(n / 2);
+                    make_ffnt_twiddles(roots.get(), logn, FORWARD);
+                    make_ffnt_twist(twist.get(), logn, FORWARD);
+                    GPU_FFNT(data.get(), temp.get(), twist.get(), roots.get(),
+                             config(logn, FORWARD, X_N_plus, 0.0), 1, false);
+                    make_ffnt_twiddles(roots.get(), logn, INVERSE);
+                    make_ffnt_twist(twist.get(), logn, INVERSE);
+                    GPU_FFNT(data.get(), temp.get(), twist.get(), roots.get(),
+                             config(logn, INVERSE, X_N_plus, 1.0 / (n / 2)), 1,
+                             false);
+                    sync();
+                    const std::vector<T> back = data.download();
+                    std::vector<COMPLEX<T>> output(n);
+                    for (size_t i = 0; i < n; i++)
+                        output[i] = COMPLEX<T>(back[i], T(0));
+                    huge_round_trip(report, name, input, output);
+                });
+        }
+
+        // 2^12 checks the direct sums against the sizes with a full reference.
+        int huge()
+        {
+            TestReport report(suite_name("huge"));
+            std::vector<int> sizes = {12};
+            for (int logn = kMaxReferenceLogN + 1; logn <= kMaxLogN; logn++)
+                sizes.push_back(logn);
+            for (int logn : sizes)
+            {
+                for (ReductionPolynomial poly : kPolys)
+                    for (type dir : kDirections)
+                        huge_case(report, logn, dir, poly, false, false,
+                                  dir == FORWARD ? 2 : 1);
+                huge_case(report, logn, FORWARD, X_N_minus, true, false, 1);
+                huge_case(report, logn, INVERSE, X_N_plus, true, false, 1);
+                huge_case(report, logn, INVERSE, X_N_plus, false, true, 1);
+                huge_special(report, logn);
+                huge_ffnt(report, logn);
             }
             return report.finish();
         }

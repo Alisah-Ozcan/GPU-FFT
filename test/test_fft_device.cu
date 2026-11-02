@@ -437,7 +437,7 @@ namespace
             launch_sizes(
                 report,
                 std::integer_sequence<int, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
-                                      12, 13, 16, 17, 20, 23, 24>());
+                                      12, 13, 16, 17, 20, 23, 24, 25, 26>());
             // The low ring kernel takes batches above the grid limit of the
             // stage kernels.
             launch_case<1, X_N_plus, FORWARD, false>(report, 65537);
@@ -628,6 +628,8 @@ namespace
             fused_stages_case<17, X_N_plus>(report, 2);
             fused_stages_case<20, X_N_minus, 512>(report, 2);
             fused_stages_case<24, X_N_plus>(report, 1);
+            // The last forward and the first inverse stage swap the grid axes.
+            fused_stages_case<25, X_N_minus>(report, 1);
             return report.finish();
         }
 
