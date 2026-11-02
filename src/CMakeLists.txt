@@ -53,17 +53,24 @@ endif()
 
 target_link_libraries(fft PUBLIC CUDA::cudart)
 
+# gpufft/config.cuh holds the version and the architectures for code that uses
+# the headers.
+set(GPUFFT_CONFIG_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include)
+configure_file(${PROJECT_SOURCE_DIR}/cmake/config.cuh.in
+               ${GPUFFT_CONFIG_INCLUDE_DIR}/gpufft/config.cuh)
+
 set_target_properties(fft PROPERTIES
   VERSION ${PROJECT_VERSION}
-  SOVERSION 1
-  OUTPUT_NAME "fft-${PROJECT_VERSION}"
+  SOVERSION ${PROJECT_VERSION_MAJOR}
+  OUTPUT_NAME "fft-${GPUFFT_VERSION_DIR}"
 )
 
 target_include_directories(
     fft
     PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include/GPUFFT-${PROJECT_VERSION}>
+    $<BUILD_INTERFACE:${GPUFFT_CONFIG_INCLUDE_DIR}>
+    $<INSTALL_INTERFACE:include/GPUFFT-${GPUFFT_VERSION_DIR}>
 )
 
 set_target_properties(fft PROPERTIES
@@ -84,4 +91,8 @@ install(TARGETS fft
 install(
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
     DESTINATION ${INCLUDES_INSTALL_DIR}
+)
+install(
+    FILES ${GPUFFT_CONFIG_INCLUDE_DIR}/gpufft/config.cuh
+    DESTINATION ${INCLUDES_INSTALL_DIR}/gpufft
 )

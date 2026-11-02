@@ -130,13 +130,16 @@ Make sure GPU-FFT is installed before integrating it into your project. The inst
 project(<your-project> LANGUAGES CXX CUDA)
 find_package(CUDAToolkit REQUIRED)
 # ...
-find_package(GPUFFT CONFIG REQUIRED)
+find_package(GPUFFT 1.0 CONFIG REQUIRED)   # any installed 1.x, at least 1.0
 # ...
 target_link_libraries(<your-target> (PRIVATE|PUBLIC|INTERFACE) GPUFFT::fft CUDA::cudart)
 # ...
-set_target_properties(<your-target> PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-# ...
 ```
+
+- Neither relocatable device code (`CUDA_SEPARABLE_COMPILATION`, `-rdc`) nor device link-time optimization is needed.
+- The version follows the release tags (`v1.0.0`). `find_package(GPUFFT 1.0 ...)` accepts an installed 1.x of at least 1.0 and rejects other major versions; `GPUFFT_VERSION` holds the version found. In code, `gpufft/config.cuh` defines `GPUFFT_VERSION_MAJOR`, `GPUFFT_VERSION_MINOR`, `GPUFFT_VERSION_PATCH` and `GPUFFT_VERSION` (`"1.0.0"`).
+- Installed paths and the library name carry `<major>.<minor>` (`include/GPUFFT-1.0`, `lib/cmake/GPUFFT-1.0`, `libfft-1.0.a`), so a patch release replaces the previous one and different minor versions can be installed side by side.
+- `GPUFFT_CUDA_ARCHITECTURES` holds the GPU architectures the installed library was compiled for; the installed `gpufft/config.cuh` records them too.
 
 All GPU-FFT types and functions are in the `gpufft` namespace. For compatibility, the complex types (`COMPLEX`, `Complex32`, `Complex64`, `Float32`, `Float64`, ...) and `complex_arithmetic` are also available in the global namespace; define `GPUFFT_NO_GLOBAL_ALIASES` to disable them.
 

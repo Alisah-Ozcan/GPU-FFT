@@ -7,6 +7,7 @@
 #ifndef GPUFFT_DESCRIPTOR_H
 #define GPUFFT_DESCRIPTOR_H
 
+#include "gpufft/config.cuh"
 #include "complex.cuh"
 #include "fft.cuh"
 #include "fft_device.cuh"
