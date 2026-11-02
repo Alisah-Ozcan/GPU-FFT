@@ -92,8 +92,8 @@ ctest --test-dir build --output-on-failure
 
 Benchmarks use [nvbench](https://github.com/NVIDIA/nvbench), which requires CMake >= 3.30.4. `benchmark_fft` runs every benchmark for both 32-bit and 64-bit data, with one polynomial (`single`) or about 2^22 values (`bulk`; one polynomial from `LogN` 22):
 - `fft`: `GPU_FFT` for `LogN` 1–28, forward and inverse, X^N-1 and X^N+1, complex or real input/output.
-- `special_fft`: `GPU_Special_FFT` for `LogN` 11–28 (the number of slots).
-- `ffnt`: `GPU_FFNT` for `LogN` 12–28 (the number of real coefficients).
+- `special_fft`: `GPU_Special_FFT` for `LogN` 1–28 (the number of slots).
+- `ffnt`: `GPU_FFNT` for `LogN` 2–28 (the number of real coefficients).
 - `poly_mult`: polynomial multiplication, the forward transform of both operands and the inverse transform with the fused pointwise product, with `GPU_FFT` (`c2c`, `real`) or `GPU_FFNT` (`ffnt`).
 
 `benchmark_device_api` holds `poly_mul`: polynomial multiplication modulo X^N + 1 with one operand already transformed, a ← IFFT(FFT(a) · b̂), for about 2^22 values and `LogN` 1–10. `Method=fused` runs it in one kernel with the device API, `Method=separate` runs `GPU_FFT` forward and `GPU_FFT` inverse with the fused product.
@@ -153,12 +153,12 @@ All GPU-FFT types and functions are in the `gpufft` namespace. For compatibility
 |---|---|---|
 | `GPU_FFT(data, roots, cfg, batch, multiplication)` | 1–28 | `batch` polynomials of 2^n_power complex values, transformed in place. |
 | `GPU_FFT(real, data, roots, cfg, batch, multiplication)` | 1–28 | Forward: real values `real` (zero imaginary parts) to complex values `data`. Inverse: `data` to its real parts in `real`; `data` is overwritten. |
-| `GPU_FFNT(real, temp, twist, roots, cfg, batch, multiplication)` | 12–28 | Negacyclic transform of 2^n_power real values ([eprint 2021/480](https://eprint.iacr.org/2021/480)): forward from `real` to 2^(n_power - 1) complex values per polynomial in `temp`, inverse from `temp` to `real`. |
-| `GPU_Special_FFT(data, roots, cfg, batch)` | 11–28 | The FFT of the CKKS canonical embedding on 2^n_power slots, in place. |
+| `GPU_FFNT(real, temp, twist, roots, cfg, batch, multiplication)` | 2–28 | Negacyclic transform of 2^n_power real values ([eprint 2021/480](https://eprint.iacr.org/2021/480)): forward from `real` to 2^(n_power - 1) complex values per polynomial in `temp`, inverse from `temp` to `real`. |
+| `GPU_Special_FFT(data, roots, cfg, batch)` | 1–28 | The FFT of the CKKS canonical embedding on 2^n_power slots, in place. |
 
 - The forward transform takes the values in natural order and returns them in bit-reversed order; the inverse takes them in bit-reversed order, returns them in natural order and multiplies them by `cfg.mod_inverse` (1 / 2^n_power to undo the forward transform, 1 / 2^(n_power - 1) for `GPU_FFNT`).
 - With `multiplication`, the inverse first multiplies each polynomial element-wise by a second operand that follows the `batch` polynomials (at `data + batch * 2^n_power`, for `GPU_FFNT` at `temp + batch * 2^(n_power - 1)`). A polynomial product is then a forward transform of both operands and one inverse transform.
-- `batch` must be positive with `batch * 2^n_power` below 2^31, and at most 65535 for sizes above 2^9 (and always for `GPU_FFNT` and `GPU_Special_FFT`).
+- `batch` must be positive with `batch * 2^n_power` below 2^31, and at most 65535 when the FFT the kernels run is larger than 2^9 (2^n_power, for `GPU_FFNT` 2^(n_power - 1)); smaller FFTs run in a single kernel that takes any batch.
 - `GPU_FFT` with real data is not a real-to-complex FFT: it transforms the real values as complex values with zero imaginary parts and keeps all 2^n_power outputs.
 - `GPU_Special_FFT` runs the loop of the algorithm in `fft.cuh` on the values as given, without its bit reversal step; the inverse with the inverse table and `mod_inverse` = 1 / 2^n_power undoes the forward transform.
 
@@ -200,16 +200,17 @@ using InvFFT = decltype(Size<1024>() + Direction<INVERSE>() + Precision<Float64>
 
 | Operator | Required | Meaning |
 |---|---|---|
-| `Size<N>` | yes | FFT size, a power of two in [2, 2^28]. |
+| `Size<N>` | yes | FFT size, a power of two in [2, 2^28]: the number of complex values, slots for the special FFT, real values for the FFNT (at least 4). |
 | `Direction<FORWARD>`, `Direction<INVERSE>` | yes | |
 | `Precision<Float32>`, `Precision<Float64>` | yes | Type of the real and imaginary parts; the values are `COMPLEX<T>` (`FFT::value_type`). `load` also reads real values and the inverse `store` can write the real parts. |
-| `ReductionPoly<X_N_minus>`, `ReductionPoly<X_N_plus>` | for `execute` | X^N - 1 or X^N + 1. |
+| `ReductionPoly<X_N_minus>`, `ReductionPoly<X_N_plus>` | for `execute` of the FFT | X^N - 1 or X^N + 1. |
+| `Transform<TransformType::Special>`, `Transform<TransformType::FFNT>` | no | The special FFT of `GPU_Special_FFT` or the FFNT of `GPU_FFNT` instead of the FFT (`TransformType::FFT`, the default). See [Special FFT and FFNT](#special-fft-and-ffnt). |
 | `Block` | no | The FFT is computed by a thread block. |
-| `BatchesPerBlock<B>` | no | Polynomials per block, only for N up to 2^9. The default gives 256 threads per block. |
+| `BatchesPerBlock<B>` | no | Polynomials per block, only for N up to 2^9 (FFNT: up to 2^10). The default gives 256 threads per block. |
 | `BlockDim<N / 2, B>` | no | For N up to 2^9: same as `BatchesPerBlock<B>`. |
-| `BlockDim<T>` | no | For N from 2^10: T threads in every kernel, T = 128, 256, 512 or 1024 and at most N / 2. The default is 256 (512 for N = 2^10), the kernels `GPU_FFT` runs. |
+| `BlockDim<T>` | no | For N from 2^10: T threads in every kernel, T = 128, 256, 512 or 1024 and at most N / 2. The default is 256 (512 for N = 2^10), the kernels of the host API. For the FFNT, N is the size of its FFT, Size / 2. |
 
-Each operator may appear once; invalid descriptions fail to compile with a `static_assert` message. The device functions live in headers and are inlined into your kernel, so the device API needs neither relocatable device code (`-rdc`) nor link-time optimization. The results are the same as those of `GPU_FFT`, bit for bit.
+Each operator may appear once; invalid descriptions fail to compile with a `static_assert` message. The device functions live in headers and are inlined into your kernel, so the device API needs neither relocatable device code (`-rdc`) nor link-time optimization. The results are the same as those of the host API, bit for bit.
 
 ### Root tables and 1 / N
 
@@ -340,7 +341,43 @@ Every thread of a single kernel or a stage kernel owns two entries of shared mem
 - **More shared memory.** The FFT uses only the first `shared_memory_size` bytes; launch with more and use the rest from `shared_memory() + shared_memory_size / sizeof(value_type)`. Above 48 KB per block, CUDA needs `cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, bytes)` first.
 - **A second buffer.** A second `shared_memory_size` area can hold another polynomial with its own `load` and `execute`; an entry has the same `position` in both buffers.
 
-[`test/test_fft_device.cu`](test/test_fft_device.cu) runs all of these against `GPU_FFT`.
+[`test/test_fft_device.cu`](test/test_fft_device.cu) runs all of these against `GPU_FFT`, and the special FFT and the FFNT against `GPU_Special_FFT` and `GPU_FFNT`.
+
+### Special FFT and FFNT
+
+`Transform<TransformType::Special>` and `Transform<TransformType::FFNT>` describe the other two transforms of the host API. They take no `ReductionPoly`; everything else (single kernel, stages, fusion, `for_each`, `entries`, `BlockDim`, `launch`) works as for the FFT.
+
+- **Special FFT** (`GPU_Special_FFT`, `Size` = slots): `make_twiddles_host` / `make_twiddles` build the table of `make_special_fft_twiddles_host` (`twiddle_table_size` = `Size`). The forward transform runs the inverse stage plan and the inverse the forward one, so the last forward stage and the first inverse stage again share their layout. Loads and stores are those of the FFT.
+- **FFNT** (`GPU_FFNT`, `Size` = real values): the kernels run an FFT of `Size / 2` values on the folded polynomial. `make_twiddles_host` / `make_twiddles` build its root table (`twiddle_table_size` = `Size / 4`), `make_twist_host` / `make_twist` the twist (forward) or untwist (inverse) table (`twist_table_size` = `Size / 2`). The forward transform starts with `load(shared_memory, data, twist)`, which folds the real values and twists them; the inverse ends with `store(shared_memory, data, untwist, n_inverse)`, which untwists and unfolds them; in a stage kernel these are the first forward and the last inverse stage. In between, shared memory holds `Size / 2` complex values per polynomial, the same as in `GPU_FFNT`'s `temp`, and `n_inv()` is 2 / `Size`. `block_data` advances real arrays by `Size` and complex arrays by `Size / 2` values per polynomial.
+
+A negacyclic product of real polynomials in one kernel, with `b_hat` = FFNT(b):
+
+```cpp
+using FwdFFNT = decltype(Size<2048>() + Direction<FORWARD>() + Precision<Float64>() +
+                         Transform<TransformType::FFNT>() + Block());
+using InvFFNT = decltype(Size<2048>() + Direction<INVERSE>() + Precision<Float64>() +
+                         Transform<TransformType::FFNT>() + Block());
+
+__global__ void ffnt_mul(Float64* a, const Complex64* b_hat, const Complex64* roots,
+                         const Complex64* twist, const Complex64* inverse_roots,
+                         const Complex64* untwist, int batch)
+{
+    Complex64* shared_memory = FwdFFNT::shared_memory();
+    Float64* polys = FwdFFNT::block_data(a);              // real values
+    const Complex64* other = FwdFFNT::block_data(b_hat);  // complex values
+    const int num_polys = FwdFFNT::num_polys(batch);
+
+    FwdFFNT().load(shared_memory, polys, twist, num_polys);
+    FwdFFNT().execute(shared_memory, roots);
+    FwdFFNT().for_each(shared_memory, [&](Complex64& value, size_t index) {
+        value = value * other[index];
+    }, num_polys);
+    InvFFNT().execute(shared_memory, inverse_roots);
+    InvFFNT().store(shared_memory, polys, untwist, InvFFNT::n_inv(), num_polys);
+}
+```
+
+`FFNT::launch(in, out, roots, twist, batch, stream)` runs a whole FFNT from the host: the forward transform reads real values and writes `Size / 2` complex values per polynomial, the inverse the other way round; an inverse with more than one stage keeps its intermediate values in `in`, like `GPU_FFNT`.
 
 ## How to Cite GPU-FFT
 

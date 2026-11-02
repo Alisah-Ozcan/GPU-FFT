@@ -307,6 +307,51 @@ template <typename T> constexpr bool last_forward_matches_first_inverse()
 static_assert(last_forward_matches_first_inverse<Float32>());
 static_assert(last_forward_matches_first_inverse<Float64>());
 
+// The special FFT runs the inverse plan forward and the forward plan
+// inverse, so its last forward stage and its first inverse stage share their
+// layout as well.
+using FwdSpecial =
+    decltype(Size<4096>() + Direction<FORWARD>() + Precision<Float64>() +
+             Transform<TransformType::Special>() + Block());
+using InvSpecial =
+    decltype(Size<4096>() + Direction<INVERSE>() + Precision<Float64>() +
+             Transform<TransformType::Special>() + Block());
+static_assert(FwdSpecial::transform == TransformType::Special);
+static_assert(FwdSpecial::num_stages == 2);
+static_assert(same_dim(FwdSpecial::stage<0>::block_dim, 256, 1, 1));
+static_assert(same_dim(FwdSpecial::stage<1>::block_dim, 64, 4, 1));
+static_assert(same_dim(InvSpecial::stage<0>::block_dim, 64, 4, 1));
+static_assert(same_dim(InvSpecial::stage<0>::grid(3),
+                       FwdSpecial::stage<1>::grid(3).x,
+                       FwdSpecial::stage<1>::grid(3).y, 3));
+static_assert(FwdSpecial::twiddle_table_size == 4096);
+static_assert(decltype(Size<512>() + Direction<FORWARD>() +
+                       Precision<Float32>() +
+                       Transform<TransformType::Special>())::num_stages == 1);
+
+// The FFNT of Size real values runs an FFT of Size / 2 values.
+using FwdFFNT =
+    decltype(Size<8192>() + Direction<FORWARD>() + Precision<Float64>() +
+             Transform<TransformType::FFNT>() + Block());
+static_assert(FwdFFNT::num_stages == 2);
+static_assert(same_dim(FwdFFNT::stage<0>::block_dim, 64, 4, 1));
+static_assert(same_dim(FwdFFNT::stage<1>::block_dim, 256, 1, 1));
+static_assert(FwdFFNT::twiddle_table_size == 2048 &&
+              FwdFFNT::twist_table_size == 4096);
+using SmallFFNT =
+    decltype(Size<1024>() + Direction<INVERSE>() + Precision<Float32>() +
+             Transform<TransformType::FFNT>() + Block());
+static_assert(SmallFFNT::num_stages == 1 && SmallFFNT::batches_per_block == 1);
+static_assert(same_dim(SmallFFNT::block_dim, 256, 1, 1));
+static_assert(SmallFFNT::shared_memory_size == 512 * sizeof(Complex32));
+static_assert(decltype(Size<4>() + Direction<FORWARD>() + Precision<Float32>() +
+                       Transform<TransformType::FFNT>())::batches_per_block ==
+              256);
+static_assert(decltype(FwdFFNT() + BlockDim<1024>())::num_stages == 2 &&
+              decltype(Size<4096>() + Direction<FORWARD>() +
+                       Precision<Float64>() + Transform<TransformType::FFNT>() +
+                       BlockDim<1024>())::num_stages == 1);
+
 // Operator values are usable in device code.
 __global__ void use_in_kernel(int* out)
 {

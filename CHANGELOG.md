@@ -6,13 +6,14 @@ GPU-FFT now runs compile-time kernels for sizes 2^1 to 2^28, has a device API fo
 
 ### Added
 
-- Device API (`gpufft/descriptor.cuh`): an FFT is described at compile time as a sum of operators (`Size`, `Direction`, `Precision`, `ReductionPoly`, `Block`, `BatchesPerBlock`, `BlockDim`) and runs inside your own kernels with `load`, `execute` and `store`, per stage for sizes above 2^10. Its results are the same as those of `GPU_FFT`, bit for bit. See the README section "Device API".
+- Device API (`gpufft/descriptor.cuh`): an FFT is described at compile time as a sum of operators (`Size`, `Direction`, `Precision`, `ReductionPoly`, `Transform`, `Block`, `BatchesPerBlock`, `BlockDim`) and runs inside your own kernels with `load`, `execute` and `store`, per stage for sizes above 2^10. Its results are the same as those of the host API, bit for bit. See the README section "Device API".
   - `for_each` and `entries()` give each thread's values in shared memory for element-wise work, e.g. a pointwise product between the forward and the inverse FFT in one kernel.
   - The last forward stage and the first inverse stage share their layout, so they can run in one kernel.
   - `FFT::launch` runs the whole transform from the host, with complex or real input (forward) and output (inverse).
   - `BlockDim<T>` sets the threads per kernel (128, 256, 512 or 1024) for sizes from 2^10; the stages are planned at compile time.
+  - `Transform<TransformType::Special>` and `Transform<TransformType::FFNT>` describe the special FFT and the FFNT; the FFNT folds and twists in its first forward `load` and untwists and unfolds in its last inverse `store`.
 - Root tables (`gpufft/twiddles.cuh`), built on the host or by a kernel: `make_fft_twiddles` for `GPU_FFT`, `make_ffnt_twiddles` and `make_ffnt_twist` for `GPU_FFNT`, `make_special_fft_twiddles` for `GPU_Special_FFT` (whose table had to be built by the caller), each with a `_host` variant, and `fft_twiddle_table_size`. A description has `make_twiddles_host`, `make_twiddles`, `twiddle_table_size` and `n_inv`.
-- `GPU_FFT` for sizes 2^1 to 2^11. Sizes up to 2^10 run in a single kernel; up to 2^9 a block transforms several polynomials and the batch may exceed 65535.
+- `GPU_FFT` for sizes 2^1 to 2^11, `GPU_Special_FFT` for 2^1 to 2^10 slots and `GPU_FFNT` for 2^2 to 2^11 real values. FFTs up to 2^10 values run in a single kernel; up to 2^9 a block transforms several polynomials and the batch may exceed 65535.
 - Sizes up to 2^28 for all transforms (was 2^24).
 - Installed `gpufft/config.cuh` with the version (`GPUFFT_VERSION_MAJOR`, `GPUFFT_VERSION_MINOR`, `GPUFFT_VERSION_PATCH`, `GPUFFT_VERSION`) and the CUDA architectures.
 - CMake package: `find_package(GPUFFT 1.0)` checks the version (same major version, at least the requested one); `GPUFFT_CUDA_ARCHITECTURES` holds the architectures the library was compiled for.

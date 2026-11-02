@@ -43,6 +43,15 @@ namespace
         using type = Base;
     };
 
+    // The special FFT (X = Special, N slots) or the FFNT (X = FFNT, N real
+    // values) of size N = 2^LogN.
+    template <typename T, int LogN, TransformType X, type D, int Threads = 0>
+    using TransformDesc =
+        typename with_threads<decltype(Size<(1 << LogN)>() + Direction<D>() +
+                                       Precision<T>() + Transform<X>() +
+                                       Block()),
+                              Threads>::type;
+
     template <typename T, int LogN, ReductionPolynomial R, type D,
               int Threads = 0, int Batches = 0>
     using DescWith = typename with_batches<
@@ -225,6 +234,100 @@ namespace
             First().store(shared_memory, a);
     }
 
+    // The special FFT of a, the product with c and the inverse special FFT
+    // in one kernel.
+    template <typename Fwd, typename Inv, typename T>
+    __global__ void special_multiply_kernel(COMPLEX<T>* a, const COMPLEX<T>* c,
+                                            const COMPLEX<T>* roots,
+                                            const COMPLEX<T>* inverse_roots,
+                                            int batch)
+    {
+        COMPLEX<T>* shared_memory = Fwd::shared_memory();
+        COMPLEX<T>* polys = Fwd::block_data(a);
+        const COMPLEX<T>* other = Fwd::block_data(c);
+        const int num_polys = Fwd::num_polys(batch);
+
+        Fwd().load(shared_memory, polys, num_polys);
+        Fwd().execute(shared_memory, roots);
+        Fwd().for_each(
+            shared_memory,
+            [&](COMPLEX<T>& value, size_t index)
+            { value = value * other[index]; },
+            num_polys);
+        Inv().execute(shared_memory, inverse_roots);
+        Inv().store(shared_memory, polys, Inv::n_inv(), num_polys);
+    }
+
+    // a <- a * c element-wise, the product of the host API references.
+    template <typename T>
+    __global__ void multiply_kernel(COMPLEX<T>* a, const COMPLEX<T>* c,
+                                    size_t count)
+    {
+        const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < count)
+            a[i] = a[i] * c[i];
+    }
+
+    // The negacyclic product of the real polynomials a and b in one kernel:
+    // forward FFNT of a, product with b_hat = FFNT(b), inverse FFNT.
+    template <typename Fwd, typename Inv, typename T>
+    __global__ void ffnt_multiply_kernel(T* a, const COMPLEX<T>* b_hat,
+                                         const COMPLEX<T>* roots,
+                                         const COMPLEX<T>* twist,
+                                         const COMPLEX<T>* inverse_roots,
+                                         const COMPLEX<T>* untwist, int batch)
+    {
+        COMPLEX<T>* shared_memory = Fwd::shared_memory();
+        T* polys = Fwd::block_data(a);
+        const COMPLEX<T>* other = Fwd::block_data(b_hat);
+        const int num_polys = Fwd::num_polys(batch);
+
+        Fwd().load(shared_memory, polys, twist, num_polys);
+        Fwd().execute(shared_memory, roots);
+        Fwd().for_each(
+            shared_memory,
+            [&](COMPLEX<T>& value, size_t index)
+            { value = value * other[index]; },
+            num_polys);
+        Inv().execute(shared_memory, inverse_roots);
+        Inv().store(shared_memory, polys, untwist, Inv::n_inv(), num_polys);
+    }
+
+    // One stage of an FFNT, as FFT::launch runs it.
+    template <typename Stage, type D, typename T, typename TIn, typename TOut>
+    __global__ void
+    ffnt_stage_kernel(const TIn* in, TOut* out, const COMPLEX<T>* roots,
+                      const COMPLEX<T>* twist, COMPLEX<T> n_inverse)
+    {
+        COMPLEX<T>* shared_memory = Stage::shared_memory();
+        if constexpr (D == FORWARD && Stage::index == 0)
+            Stage().load(shared_memory, in, twist);
+        else
+            Stage().load(shared_memory, in);
+        Stage().execute(shared_memory, roots);
+        if constexpr (D == INVERSE && Stage::last)
+            Stage().store(shared_memory, out, twist, n_inverse);
+        else
+            Stage().store(shared_memory, out);
+    }
+
+    // The last forward FFNT stage, the product with b_hat and the first
+    // inverse stage in one kernel; the complex values stay in work.
+    template <typename Last, typename First, typename T>
+    __global__ void ffnt_fused_stage_kernel(COMPLEX<T>* work,
+                                            const COMPLEX<T>* b_hat,
+                                            const COMPLEX<T>* roots,
+                                            const COMPLEX<T>* inverse_roots)
+    {
+        COMPLEX<T>* shared_memory = Last::shared_memory();
+        Last().load(shared_memory, work);
+        Last().execute(shared_memory, roots);
+        Last().for_each(shared_memory, [&](COMPLEX<T>& value, size_t index)
+                        { value = value * b_hat[index]; });
+        First().execute(shared_memory, inverse_roots);
+        First().store(shared_memory, work);
+    }
+
     // ---------------- Tests ----------------
 
     template <typename T> class DeviceTests
@@ -239,6 +342,8 @@ namespace
             result |= launch();
             result |= fused();
             result |= fused_stages();
+            result |= special();
+            result |= ffnt();
             result |= validation();
             return result;
         }
@@ -633,6 +738,467 @@ namespace
             return report.finish();
         }
 
+        // ---------------- Special FFT ----------------
+
+        static fft_configuration<T> special_config(int logl, type dir)
+        {
+            return host_config<T>(logl, dir, X_N_plus);
+        }
+
+        template <int LogN, type D, int Threads = 0>
+        void special_launch_case(TestReport& report, int batch)
+        {
+            using FFT =
+                TransformDesc<T, LogN, TransformType::Special, D, Threads>;
+            const std::string name = case_name("special launch" + dir_name(D),
+                                               LogN, X_N_plus, Threads, batch);
+            guarded(report, name,
+                    [&]
+                    {
+                        const size_t count = size_t(batch) << LogN;
+                        const std::vector<COMPLEX<T>> input = random(count);
+                        DeviceBuffer<COMPLEX<T>> roots(
+                            FFT::make_twiddles_host());
+                        DeviceBuffer<COMPLEX<T>> expected(input);
+                        DeviceBuffer<COMPLEX<T>> in(input);
+                        DeviceBuffer<COMPLEX<T>> out(count);
+                        GPU_Special_FFT(expected.get(), roots.get(),
+                                        special_config(LogN, D), batch);
+                        FFT::launch(static_cast<const COMPLEX<T>*>(in.get()),
+                                    out.get(), roots.get(), batch);
+                        sync();
+                        const std::vector<COMPLEX<T>> reference =
+                            expected.download();
+                        report.check_equal(name, out.download(), reference);
+                        FFT::launch(in.get(), in.get(), roots.get(), batch);
+                        sync();
+                        report.check_equal(name + " in place", in.download(),
+                                           reference);
+                    });
+        }
+
+        template <int LogN, int Threads = 0>
+        void special_launch_size(TestReport& report, int batch)
+        {
+            special_launch_case<LogN, FORWARD, Threads>(report, batch);
+            special_launch_case<LogN, INVERSE, Threads>(report, batch);
+        }
+
+        template <int... LogN>
+        void special_launch_sizes(TestReport& report,
+                                  std::integer_sequence<int, LogN...>)
+        {
+            (special_launch_size<LogN>(report, batch_for(LogN)), ...);
+        }
+
+        // Forward special FFT, product with c, inverse special FFT with the
+        // host API and a product kernel.
+        template <int LogN>
+        std::vector<COMPLEX<T>>
+        host_special_product(const std::vector<COMPLEX<T>>& a,
+                             const std::vector<COMPLEX<T>>& c, int batch)
+        {
+            using Fwd = TransformDesc<T, LogN, TransformType::Special, FORWARD>;
+            using Inv = TransformDesc<T, LogN, TransformType::Special, INVERSE>;
+            DeviceBuffer<COMPLEX<T>> data(a);
+            DeviceBuffer<COMPLEX<T>> other(c);
+            DeviceBuffer<COMPLEX<T>> roots(Fwd::make_twiddles_host());
+            DeviceBuffer<COMPLEX<T>> inverse_roots(Inv::make_twiddles_host());
+            GPU_Special_FFT(data.get(), roots.get(),
+                            special_config(LogN, FORWARD), batch);
+            multiply_kernel<<<(a.size() + 255) / 256, 256>>>(
+                data.get(), other.get(), a.size());
+            GPU_Special_FFT(data.get(), inverse_roots.get(),
+                            special_config(LogN, INVERSE), batch);
+            sync();
+            return data.download();
+        }
+
+        template <int LogN, int Threads = 0>
+        void special_fused_case(TestReport& report, int batch)
+        {
+            using Fwd = TransformDesc<T, LogN, TransformType::Special, FORWARD,
+                                      Threads>;
+            using Inv = TransformDesc<T, LogN, TransformType::Special, INVERSE,
+                                      Threads>;
+            static_assert(Fwd::num_stages == 1 && Inv::num_stages == 1);
+            const std::string name =
+                case_name("special fused", LogN, X_N_plus, Threads, batch);
+            guarded(report, name,
+                    [&]
+                    {
+                        const size_t count = size_t(batch) << LogN;
+                        const std::vector<COMPLEX<T>> a = random(count);
+                        const std::vector<COMPLEX<T>> c = random(count);
+                        const std::vector<COMPLEX<T>> expected =
+                            host_special_product<LogN>(a, c, batch);
+                        DeviceBuffer<COMPLEX<T>> data(a);
+                        DeviceBuffer<COMPLEX<T>> other(c);
+                        DeviceBuffer<COMPLEX<T>> roots(
+                            Fwd::make_twiddles_host());
+                        DeviceBuffer<COMPLEX<T>> inverse_roots(
+                            Inv::make_twiddles_host());
+                        special_multiply_kernel<Fwd, Inv, T>
+                            <<<Fwd::grid(batch), Fwd::block_dim,
+                               Fwd::shared_memory_size>>>(
+                                data.get(), other.get(), roots.get(),
+                                inverse_roots.get(), batch);
+                        GPUFFT_CUDA_CHECK(cudaGetLastError());
+                        sync();
+                        report.check_equal(name, data.download(), expected);
+                    });
+        }
+
+        template <int... LogN>
+        void special_fused_sizes(TestReport& report,
+                                 std::integer_sequence<int, LogN...>)
+        {
+            (special_fused_case<LogN>(report, batch_for(LogN)), ...);
+        }
+
+        // The stages of the special FFT product with the last forward and
+        // the first inverse stage fused around the product with c.
+        template <int LogN, int Threads = 0>
+        void special_fused_stages_case(TestReport& report, int batch)
+        {
+            using Fwd = TransformDesc<T, LogN, TransformType::Special, FORWARD,
+                                      Threads>;
+            using Inv = TransformDesc<T, LogN, TransformType::Special, INVERSE,
+                                      Threads>;
+            static_assert(Fwd::num_stages > 1 &&
+                          Fwd::num_stages == Inv::num_stages);
+            constexpr int stages = Fwd::num_stages;
+            const std::string name = case_name("special fused stages", LogN,
+                                               X_N_plus, Threads, batch);
+            guarded(
+                report, name,
+                [&]
+                {
+                    const size_t count = size_t(batch) << LogN;
+                    const std::vector<COMPLEX<T>> a = random(count);
+                    const std::vector<COMPLEX<T>> c = random(count);
+                    const std::vector<COMPLEX<T>> expected =
+                        host_special_product<LogN>(a, c, batch);
+                    DeviceBuffer<COMPLEX<T>> data(a);
+                    DeviceBuffer<COMPLEX<T>> other(c);
+                    DeviceBuffer<COMPLEX<T>> roots(Fwd::make_twiddles_host());
+                    DeviceBuffer<COMPLEX<T>> inverse_roots(
+                        Inv::make_twiddles_host());
+                    const COMPLEX<T> n_inverse = Inv::n_inv();
+                    Fwd::for_each_stage(
+                        [&](auto I)
+                        {
+                            if constexpr (I + 1 < stages)
+                            {
+                                using Stage = typename Fwd::template stage<I>;
+                                stage_kernel<Stage, FORWARD, T>
+                                    <<<Stage::grid(batch), Stage::block_dim,
+                                       Stage::shared_memory_size>>>(
+                                        data.get(), data.get(), roots.get(),
+                                        n_inverse);
+                            }
+                        });
+                    using Last = typename Fwd::template stage<stages - 1>;
+                    using First = typename Inv::template stage<0>;
+                    fused_stage_kernel<Last, First, T>
+                        <<<Last::grid(batch), Last::block_dim,
+                           Last::shared_memory_size>>>(
+                            data.get(), other.get(), roots.get(),
+                            inverse_roots.get(), n_inverse);
+                    Inv::for_each_stage(
+                        [&](auto I)
+                        {
+                            if constexpr (I > 0)
+                            {
+                                using Stage = typename Inv::template stage<I>;
+                                stage_kernel<Stage, INVERSE, T>
+                                    <<<Stage::grid(batch), Stage::block_dim,
+                                       Stage::shared_memory_size>>>(
+                                        data.get(), data.get(),
+                                        inverse_roots.get(), n_inverse);
+                            }
+                        });
+                    GPUFFT_CUDA_CHECK(cudaGetLastError());
+                    sync();
+                    report.check_equal(name, data.download(), expected);
+                });
+        }
+
+        int special()
+        {
+            TestReport report(suite_name("special"));
+            special_launch_sizes(
+                report,
+                std::integer_sequence<int, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+                                      12, 13, 16, 17, 20, 24, 25>());
+            special_launch_size<11, 1024>(report, 3);
+            special_launch_size<16, 128>(report, 3);
+            special_launch_size<24, 1024>(report, 1);
+            special_fused_sizes(
+                report,
+                std::integer_sequence<int, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10>());
+            special_fused_case<11, 1024>(report, 3);
+            special_fused_stages_case<11>(report, 3);
+            special_fused_stages_case<16>(report, 3);
+            special_fused_stages_case<16, 128>(report, 3);
+            special_fused_stages_case<25>(report, 1);
+            return report.finish();
+        }
+
+        // ---------------- FFNT ----------------
+
+        // GPU_FFNT of 2^logn real values multiplies by 1 / 2^(logn - 1).
+        static fft_configuration<T> ffnt_config(int logn, type dir)
+        {
+            fft_configuration<T> cfg = host_config<T>(logn, dir, X_N_plus);
+            cfg.mod_inverse = COMPLEX<T>(T(1) / T(1 << (logn - 1)), T(0));
+            return cfg;
+        }
+
+        std::vector<T> random_reals(size_t count)
+        {
+            return to_t<T>(random_real(rng_, count));
+        }
+
+        template <int LogN, type D, int Threads = 0>
+        void ffnt_launch_case(TestReport& report, int batch)
+        {
+            using FFT = TransformDesc<T, LogN, TransformType::FFNT, D, Threads>;
+            const std::string name = case_name("ffnt launch" + dir_name(D),
+                                               LogN, X_N_plus, Threads, batch);
+            guarded(
+                report, name,
+                [&]
+                {
+                    const size_t reals = size_t(batch) << LogN;
+                    const size_t values = reals / 2;
+                    DeviceBuffer<COMPLEX<T>> roots(FFT::make_twiddles_host());
+                    DeviceBuffer<COMPLEX<T>> twist(FFT::make_twist_host());
+                    const fft_configuration<T> cfg = ffnt_config(LogN, D);
+                    if constexpr (D == FORWARD)
+                    {
+                        DeviceBuffer<T> in(random_reals(reals));
+                        DeviceBuffer<COMPLEX<T>> expected(values);
+                        DeviceBuffer<COMPLEX<T>> out(values);
+                        GPU_FFNT(in.get(), expected.get(), twist.get(),
+                                 roots.get(), cfg, batch, false);
+                        FFT::launch(static_cast<const T*>(in.get()), out.get(),
+                                    roots.get(), twist.get(), batch);
+                        sync();
+                        report.check_equal(name, out.download(),
+                                           expected.download());
+                    }
+                    else
+                    {
+                        // Both overwrite the input with intermediate values.
+                        const std::vector<COMPLEX<T>> input = random(values);
+                        DeviceBuffer<COMPLEX<T>> host_in(input);
+                        DeviceBuffer<COMPLEX<T>> in(input);
+                        DeviceBuffer<T> expected(reals);
+                        DeviceBuffer<T> out(reals);
+                        GPU_FFNT(expected.get(), host_in.get(), twist.get(),
+                                 roots.get(), cfg, batch, false);
+                        FFT::launch(in.get(), out.get(), roots.get(),
+                                    twist.get(), batch);
+                        sync();
+                        report.check_equal(name, out.download(),
+                                           expected.download());
+                    }
+                });
+        }
+
+        template <int LogN, int Threads = 0>
+        void ffnt_launch_size(TestReport& report, int batch)
+        {
+            ffnt_launch_case<LogN, FORWARD, Threads>(report, batch);
+            ffnt_launch_case<LogN, INVERSE, Threads>(report, batch);
+        }
+
+        template <int... LogN>
+        void ffnt_launch_sizes(TestReport& report,
+                               std::integer_sequence<int, LogN...>)
+        {
+            (ffnt_launch_size<LogN>(report, batch_for(LogN - 1)), ...);
+        }
+
+        // a * b of real polynomials with GPU_FFNT: forward FFNT of both,
+        // inverse FFNT with the product. Also returns b_hat = FFNT(b).
+        template <int LogN>
+        std::vector<T> host_ffnt_product(const std::vector<T>& a,
+                                         const std::vector<T>& b, int batch,
+                                         std::vector<COMPLEX<T>>& b_hat)
+        {
+            using Fwd = TransformDesc<T, LogN, TransformType::FFNT, FORWARD>;
+            using Inv = TransformDesc<T, LogN, TransformType::FFNT, INVERSE>;
+            std::vector<T> both(a);
+            both.insert(both.end(), b.begin(), b.end());
+            DeviceBuffer<T> data(both);
+            DeviceBuffer<COMPLEX<T>> temp(both.size() / 2);
+            DeviceBuffer<COMPLEX<T>> roots(Fwd::make_twiddles_host());
+            DeviceBuffer<COMPLEX<T>> twist(Fwd::make_twist_host());
+            DeviceBuffer<COMPLEX<T>> inverse_roots(Inv::make_twiddles_host());
+            DeviceBuffer<COMPLEX<T>> untwist(Inv::make_twist_host());
+            GPU_FFNT(data.get(), temp.get(), twist.get(), roots.get(),
+                     ffnt_config(LogN, FORWARD), 2 * batch, false);
+            sync();
+            const std::vector<COMPLEX<T>> spectra = temp.download();
+            b_hat.assign(spectra.begin() + spectra.size() / 2, spectra.end());
+            GPU_FFNT(data.get(), temp.get(), untwist.get(), inverse_roots.get(),
+                     ffnt_config(LogN, INVERSE), batch, true);
+            sync();
+            std::vector<T> product = data.download();
+            product.resize(a.size());
+            return product;
+        }
+
+        template <int LogN, int Threads = 0>
+        void ffnt_fused_case(TestReport& report, int batch)
+        {
+            using Fwd =
+                TransformDesc<T, LogN, TransformType::FFNT, FORWARD, Threads>;
+            using Inv =
+                TransformDesc<T, LogN, TransformType::FFNT, INVERSE, Threads>;
+            static_assert(Fwd::num_stages == 1 && Inv::num_stages == 1);
+            const std::string name =
+                case_name("ffnt fused", LogN, X_N_plus, Threads, batch);
+            guarded(
+                report, name,
+                [&]
+                {
+                    const size_t reals = size_t(batch) << LogN;
+                    const std::vector<T> a = random_reals(reals);
+                    const std::vector<T> b = random_reals(reals);
+                    std::vector<COMPLEX<T>> b_hat_host;
+                    const std::vector<T> expected =
+                        host_ffnt_product<LogN>(a, b, batch, b_hat_host);
+                    DeviceBuffer<T> data(a);
+                    DeviceBuffer<COMPLEX<T>> b_hat(b_hat_host);
+                    DeviceBuffer<COMPLEX<T>> roots(Fwd::make_twiddles_host());
+                    DeviceBuffer<COMPLEX<T>> twist(Fwd::make_twist_host());
+                    DeviceBuffer<COMPLEX<T>> inverse_roots(
+                        Inv::make_twiddles_host());
+                    DeviceBuffer<COMPLEX<T>> untwist(Inv::make_twist_host());
+                    ffnt_multiply_kernel<Fwd, Inv, T>
+                        <<<Fwd::grid(batch), Fwd::block_dim,
+                           Fwd::shared_memory_size>>>(
+                            data.get(), b_hat.get(), roots.get(), twist.get(),
+                            inverse_roots.get(), untwist.get(), batch);
+                    GPUFFT_CUDA_CHECK(cudaGetLastError());
+                    sync();
+                    report.check_equal(name, data.download(), expected);
+                });
+        }
+
+        template <int... LogN>
+        void ffnt_fused_sizes(TestReport& report,
+                              std::integer_sequence<int, LogN...>)
+        {
+            (ffnt_fused_case<LogN>(report, batch_for(LogN - 1)), ...);
+        }
+
+        // The stages of the FFNT product with the last forward and the first
+        // inverse stage fused around the product with b_hat.
+        template <int LogN, int Threads = 0>
+        void ffnt_fused_stages_case(TestReport& report, int batch)
+        {
+            using Fwd =
+                TransformDesc<T, LogN, TransformType::FFNT, FORWARD, Threads>;
+            using Inv =
+                TransformDesc<T, LogN, TransformType::FFNT, INVERSE, Threads>;
+            static_assert(Fwd::num_stages > 1 &&
+                          Fwd::num_stages == Inv::num_stages);
+            constexpr int stages = Fwd::num_stages;
+            const std::string name =
+                case_name("ffnt fused stages", LogN, X_N_plus, Threads, batch);
+            guarded(
+                report, name,
+                [&]
+                {
+                    const size_t reals = size_t(batch) << LogN;
+                    const std::vector<T> a = random_reals(reals);
+                    const std::vector<T> b = random_reals(reals);
+                    std::vector<COMPLEX<T>> b_hat_host;
+                    const std::vector<T> expected =
+                        host_ffnt_product<LogN>(a, b, batch, b_hat_host);
+                    DeviceBuffer<T> data(a);
+                    DeviceBuffer<COMPLEX<T>> work(reals / 2);
+                    DeviceBuffer<COMPLEX<T>> b_hat(b_hat_host);
+                    DeviceBuffer<COMPLEX<T>> roots(Fwd::make_twiddles_host());
+                    DeviceBuffer<COMPLEX<T>> twist(Fwd::make_twist_host());
+                    DeviceBuffer<COMPLEX<T>> inverse_roots(
+                        Inv::make_twiddles_host());
+                    DeviceBuffer<COMPLEX<T>> untwist(Inv::make_twist_host());
+                    const COMPLEX<T> n_inverse = Inv::n_inv();
+                    Fwd::for_each_stage(
+                        [&](auto I)
+                        {
+                            using Stage = typename Fwd::template stage<I>;
+                            if constexpr (I == 0)
+                                ffnt_stage_kernel<Stage, FORWARD, T>
+                                    <<<Stage::grid(batch), Stage::block_dim,
+                                       Stage::shared_memory_size>>>(
+                                        data.get(), work.get(), roots.get(),
+                                        twist.get(), n_inverse);
+                            else if constexpr (I + 1 < stages)
+                                ffnt_stage_kernel<Stage, FORWARD, T>
+                                    <<<Stage::grid(batch), Stage::block_dim,
+                                       Stage::shared_memory_size>>>(
+                                        work.get(), work.get(), roots.get(),
+                                        twist.get(), n_inverse);
+                        });
+                    using Last = typename Fwd::template stage<stages - 1>;
+                    using First = typename Inv::template stage<0>;
+                    ffnt_fused_stage_kernel<Last, First, T>
+                        <<<Last::grid(batch), Last::block_dim,
+                           Last::shared_memory_size>>>(work.get(), b_hat.get(),
+                                                       roots.get(),
+                                                       inverse_roots.get());
+                    Inv::for_each_stage(
+                        [&](auto I)
+                        {
+                            using Stage = typename Inv::template stage<I>;
+                            if constexpr (I + 1 == stages)
+                                ffnt_stage_kernel<Stage, INVERSE, T>
+                                    <<<Stage::grid(batch), Stage::block_dim,
+                                       Stage::shared_memory_size>>>(
+                                        work.get(), data.get(),
+                                        inverse_roots.get(), untwist.get(),
+                                        n_inverse);
+                            else if constexpr (I > 0)
+                                ffnt_stage_kernel<Stage, INVERSE, T>
+                                    <<<Stage::grid(batch), Stage::block_dim,
+                                       Stage::shared_memory_size>>>(
+                                        work.get(), work.get(),
+                                        inverse_roots.get(), untwist.get(),
+                                        n_inverse);
+                        });
+                    GPUFFT_CUDA_CHECK(cudaGetLastError());
+                    sync();
+                    report.check_equal(name, data.download(), expected);
+                });
+        }
+
+        int ffnt()
+        {
+            TestReport report(suite_name("ffnt"));
+            ffnt_launch_sizes(
+                report,
+                std::integer_sequence<int, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+                                      13, 14, 17, 18, 21, 25, 26>());
+            ffnt_launch_size<12, 1024>(report, 3);
+            ffnt_launch_size<17, 128>(report, 3);
+            ffnt_launch_size<25, 1024>(report, 1);
+            ffnt_fused_sizes(
+                report,
+                std::integer_sequence<int, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11>());
+            ffnt_fused_case<12, 1024>(report, 3);
+            ffnt_fused_stages_case<12>(report, 3);
+            ffnt_fused_stages_case<17>(report, 3);
+            ffnt_fused_stages_case<17, 128>(report, 3);
+            ffnt_fused_stages_case<26>(report, 1);
+            return report.finish();
+        }
+
         // ---------------- Input checks ----------------
 
         template <typename F>
@@ -668,6 +1234,12 @@ namespace
                            [&] { Large::launch(c, c, c, 65536); });
             expect_invalid(report, "batch * N = 2^31",
                            [&] { Largest::launch(c, c, c, 128); });
+            T* r = nullptr;
+            using FFNT12 = TransformDesc<T, 12, TransformType::FFNT, FORWARD>;
+            expect_invalid(report, "ffnt batch 0",
+                           [&] { FFNT12::launch(r, c, c, c, 0); });
+            expect_invalid(report, "ffnt stages batch 65536",
+                           [&] { FFNT12::launch(r, c, c, c, 65536); });
             return report.finish();
         }
 
