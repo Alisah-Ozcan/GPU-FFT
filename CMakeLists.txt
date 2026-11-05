@@ -103,3 +103,22 @@ message(STATUS "GPUFFT_BUILD_BENCHMARKS: ${GPUFFT_BUILD_BENCHMARKS}")
 if(GPUFFT_BUILD_BENCHMARKS)
     add_subdirectory(benchmark)
 endif()
+
+#############
+# UNINSTALL #
+#############
+
+# Only for a build of GPU-FFT itself: a project that adds GPU-FFT with
+# add_subdirectory (as HEonGPU does) defines its own uninstall target.
+if(PROJECT_IS_TOP_LEVEL AND NOT TARGET uninstall)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+        @ONLY
+    )
+    add_custom_target(uninstall
+        COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+        COMMENT "Uninstalling GPU-FFT..."
+        USES_TERMINAL
+    )
+endif()
